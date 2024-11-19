@@ -1,0 +1,41 @@
+[build-system]
+requires = ["setuptools", "wheel"]
+build-backend = "setuptools.build_meta"
+
+
+[project]
+name = "AlveoLab"
+description = "A Python framework for processing dental meshes, focused on alveolar cleft treatment."
+authors = [{name = "Yihang Xie", email = "yihagnxie20001013@gmail.com"}]
+version = "0.1.0"
+requires-python = ">=3.10"
+license = {text = 'MIT'}
+keywords = ["dental", "mesh", "alveolar cleft", "geometry", "graphics"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Natural Language :: English",
+    "Topic :: Scientific/Engineering",
+    "Topic :: Multimedia :: Graphics",
+    "Topic :: Multimedia :: Graphics :: 3D Modeling"
+]
+
+dependencies = [
+    "numpy>=1.20",
+    "trimesh[easy]",
+    "pyvista"
+]
+
+[project.readme]
+file = "README.md"
+content-type = "text/markdown"
+
+[tool.setuptools.packages.find]
+include = [
+    'AlveoLab',
+    'AlveoLab.*'
+]
