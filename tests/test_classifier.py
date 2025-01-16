@@ -3,11 +3,11 @@ import trimesh as tm
 import pyvista as pv
 from pyvista import plotting
 
-from AlveoLab.orienter import Orienter
+from AlveoLab.orienter.orienter import Orienter
 from AlveoLab.cleft_classifier import CleftClassifier
 
 if __name__ == '__main__':
-    mesh: tm.Trimesh = tm.load_mesh('../data/unilateral/0582_BIRTH_Maxillary_export.stl')
+    mesh: tm.Trimesh = tm.load_mesh('../data/unilateral/1047_Birth_Maxillary_export.stl')
     orienter = Orienter(mesh)
     mesh.apply_transform(orienter.to_origin_transform_matrix)
     classifier = CleftClassifier(mesh)
@@ -39,7 +39,7 @@ if __name__ == '__main__':
     # colors[classifier.mask_right_segment] = [0.2745, 0.5098, 0.7059]
     # colors[classifier.mask_forward_segment] = [0.4196, 0.5569, 0.1373]
     colors[classifier.mask_left_segment] = [0.9, 0, 0]
-    colors[classifier.mask_right_segment] = [0, 0, 0.9]
+    colors[classifier.mask_right_segment] = [0, 0, 1.0]
     if classifier.cleft_position_mask == (1, 1):
         colors[classifier.mask_forward_segment] = [0, 0.9, 0]
         path1 = pv.MultipleLines(mesh.vertices[classifier.shortest_path_left_forward])

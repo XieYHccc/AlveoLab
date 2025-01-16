@@ -4,11 +4,11 @@ import pyvista as pv
 import matplotlib.pyplot as plt
 from pyvista import plotting
 
-from AlveoLab.orienter.orienter import Orienter
+from AlveoLab.orienter.pca_orienter import PcaOrienter
 
 if __name__ == '__main__':
-    mesh: tm.Trimesh = tm.load_mesh('../data/unilateral/0281_3 M_Maxillary_export.stl')
-    orienter = Orienter(mesh)
+    mesh: tm.Trimesh = tm.load_mesh('../data/1JMandibular_export.stl')
+    orienter = PcaOrienter(mesh)
     mesh.apply_transform(orienter.to_origin_transform_matrix)
 
     # fit the dental arch

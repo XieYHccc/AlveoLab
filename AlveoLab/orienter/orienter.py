@@ -2,7 +2,7 @@ import numpy as np
 from trimesh.bounds import oriented_bounds
 from trimesh import Trimesh
 
-from AlveoLab.base_orienter import BaseOrienter
+from AlveoLab.orienter._base_orienter import BaseOrienter
 from AlveoLab.geometry import normalize_vector
 
 

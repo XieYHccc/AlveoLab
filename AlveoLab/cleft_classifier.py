@@ -10,7 +10,7 @@ import networkx as nx
 import trimesh as tm
 
 from AlveoLab.utils import get_logger, logging, now
-from AlveoLab.orienter import Orienter
+from AlveoLab.orienter.orienter import Orienter
 from AlveoLab.trimesh_utils import get_face_face_adjacency, get_edge_based_curvature
 from AlveoLab.geometry import normalize_vector
 
@@ -60,16 +60,21 @@ class CleftClassifier:
         print(self.cleft_position_mask)
 
     def _run(self):
-        tic = now()
+        logger.info("vertices: %d, faces: %d", self._mesh.vertices.shape[0], self._mesh.faces.shape[0])
+        start = now()
 
         # 1. orientate the mesh and move mesh to the origin
+        step_start = now()
         self._orienter = Orienter(self._mesh)
         self._mesh.apply_transform(self._orienter.to_origin_transform_matrix)
+        step_end = now()
+        logger.debug("Orient dental model in %0.4fs", step_end - step_start)
 
         # 2. find peaks
         self._find_peaks()
 
         # 3. perform region grow for left and right peak
+        step_start = now()
         # try a small threshold first to see if it's a bilateral
         _, l = self._region_grow_from_peak(self.peak_vertex_id_left, 2)
         _, r = self._region_grow_from_peak(self.peak_vertex_id_right, 2)
@@ -98,7 +103,7 @@ class CleftClassifier:
 
         # capture the alveolar segments with maximum precision
         assert self._cleft_position_mask != (0, 0)
-        threshold = 3.5
+        threshold = 2.7
         stop = False
         if self._cleft_position_mask == (1, 1):
             while not stop:
@@ -125,6 +130,9 @@ class CleftClassifier:
                 self.mask_right_segment = self.mask_right_segment | f
             elif self.cleft_position_mask == (0, 1):
                 self.mask_left_segment = self.mask_left_segment | f
+
+        step_end = now()
+        logger.debug("multi-stage region growing in %0.4fs", step_end - step_start)
 
         # threshold = 4.5
         # stop = False
@@ -187,13 +195,16 @@ class CleftClassifier:
         self._locate_near_gap_landmarks()
 
         # 6.find the shortest path between gap landmarks
+        step_start = now()
         self._find_shortest_path_between_gap_landmarks()
+        step_end = now()
+        logger.debug("Find shortest path in %0.4fs", step_end - step_start)
 
         # 7. determine cleft completeness
         self._determine_cleft_completeness()
         logger.debug("model's cleft position: %s", self.cleft_position_mask)
         logger.debug("model's cleft completeness: %s", self.cleft_completeness_mask)
-        logger.debug("Classify dental model in %0.4fs", now() - tic)
+        logger.debug("Classify dental model in %0.4fs", now() - start)
 
     def _find_peaks(self):
         # partition the mesh into three regions
