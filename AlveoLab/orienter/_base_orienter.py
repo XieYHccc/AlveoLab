@@ -5,12 +5,41 @@ from trimesh import Trimesh
 
 class BaseOrienter(ABC):
     """
-    Abstract base class for orientation of dental models.
+    Abstract base class for orientation of trimesh dental models.
+
+    +-------------------+------------------------------------------------------+
+    | Attribute         | Description                                          |
+    +===================+======================================================+
+    | :attr:`right`     | Both from the doctor's perspective.                 |
+    +-------------------+                                                      |
+    | :attr:`forwards`  |                                                      |
+    +-------------------+------------------------------------------------------+
+    | :attr:`up`        | To the roof regardless of                          |
+    |                   | whether the model is maxillary of mandibular.        |
+    +-------------------+------------------------------------------------------+
+    | :attr:`occlusal`  | Alias for the direction of the teeth. Up if it is    |
+    |                   | a lower jaw or down if it is an upper jaw.           |
+    +-------------------+------------------------------------------------------+
     """
 
-    def __init__(self, mesh: Trimesh, arch_type=None):
+    mesh: Trimesh
+    arch_type: str
+    """Either of:
+
+    * :py:`'U'` for a maxillary (upper) jaw.
+    * :py:`'L'` for a mandibular (lower) jaw.
+
+    """
+
+    def __init__(self, mesh, arch_type = None):
         self.mesh = mesh
         self.arch_type = arch_type
+
+    @property
+    @abstractmethod
+    def center(self):
+        """Center of Mass of the mesh."""
+        pass
 
     @property
     @abstractmethod
@@ -28,6 +57,12 @@ class BaseOrienter(ABC):
     @abstractmethod
     def right(self):
         """The cross product of up and forward."""
+        pass
+
+    @property
+    @abstractmethod
+    def occlusal(self):
+        """:attr:`up` for a mandibular model, down for a maxillary model."""
         pass
 
     @property

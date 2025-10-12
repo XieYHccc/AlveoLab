@@ -28,10 +28,13 @@ class PcaOrienter(BaseOrienter):
         return self._center
 
     @property
+    def occlusal(self):
+        return self.up if self.arch_type == "L" else -self.up
+
+    @property
     def axes(self) -> np.ndarray:
         """
-        The core unit-vectors listed in :attr:`names` as columns of a
-        3x3 matrix.
+        right, up, forward in order
 
         This rotation matrix may be used to normalise and unnormalise a set of
         points.
@@ -56,13 +59,13 @@ class PcaOrienter(BaseOrienter):
         result[:3, 3] = -self.center
         return result
 
-    def __init__(self, mesh: Trimesh, arch_type=None):
+    def __init__(self, mesh, arch_type):
         super().__init__(mesh, arch_type)  # Initialize common attributes in the base class
         self._axisX = None
         self._axisY = None
         self._axisZ = None
-        self._to_origin_transform_matrix = None
         self._center = None
+        # self._to_origin_transform_matrix = None
         self._run()
 
     def _run(self):
@@ -74,9 +77,16 @@ class PcaOrienter(BaseOrienter):
         class
         """
         self._apply_pca()
-        self._check_axis_z_sign()
         self._check_axis_y_sign()
+        self._check_axis_z_sign()
         self._check_axis_x_sign()
+
+        # Check we haven't accidentally mirrored it.
+        # Read as == 1 with rounding tolerance.
+        # Would be -1 if mirrored.
+        assert 1.001 > np.linalg.det(self.axes) > 0.999
+
+        #self._adjust_axis_y_to_tips()
 
     def _apply_pca(self):
         """
@@ -92,7 +102,7 @@ class PcaOrienter(BaseOrienter):
         So in ascending order of covariance (as numpy.linalg.eigh returns) they
         should be eZ, eY, eX.
         """
-        convex_hull = self.mesh.convex_hull
+        # convex_hull = self.mesh.convex_hull
         weights = (.05 - self.mesh.area_faces).clip(min=0)
         pca = Pca(self.mesh.triangles_center, weights)
         self._center = pca.center_of_mass
@@ -108,11 +118,11 @@ class PcaOrienter(BaseOrienter):
         of mesh.face_normals could give a decent approximation of occlusal
         """
 
-        # get an approximate up direction from the mesh's face normals.
-        approximated_up = normalize_vector([i.sum() for i in self.mesh.face_normals.T])
+        # get an approximate occlusal from the mesh's face normals.
+        approximated_occlusal = normalize_vector([i.sum() for i in self.mesh.face_normals.T])
 
         # compare it with current up direction
-        agreement = np.dot(approximated_up, self._axisY)
+        agreement = np.dot(approximated_occlusal, self.occlusal)
 
         self._axisY *= np.sign(agreement)  # swap sign if necessary
 
@@ -134,7 +144,7 @@ class PcaOrienter(BaseOrienter):
                 for e in (self._axisX, self._axisZ))
 
         # prioritise the more occlusal points
-        weights = np.dot(self.mesh.triangles_center, self._axisY)
+        weights = np.dot(self.mesh.triangles_center, self.occlusal)
 
         # prioritise non-occlusal facing triangles.
         # This is supposed to capture the labial and lingual vertical surfaces.
@@ -160,3 +170,40 @@ class PcaOrienter(BaseOrienter):
 
         # If rotation matrix mirrors then reverse eX
         self._axisX *= np.sign(np.linalg.det(self.axes))
+
+    def _adjust_axis_y_to_tips(self):
+        """Tilt the model forwards/backwards so that the tips of teeth are at
+        the same height.
+
+        PCA's vertical is only approximate. This step improves its accuracy
+        by fitting a line across the top of the model then adjusting
+        :attr:`forwards` and :attr:`occlusal` so that this line is horizontal.
+        """
+        points = self.mesh.triangles_center
+        ys = np.dot(points, self.forward)
+        heights = np.dot(points, self.occlusal)
+
+        min_height = heights.min()
+
+        bins = np.arange(ys.min() - 1, ys.max() + 1)
+        args = np.digitize(ys, bins)
+
+        # These lines just find the max height in each bin.
+        max_heights = np.full_like(bins, min_height)
+        np.maximum.at(max_heights, args, heights)
+
+        weights = np.abs((bins - bins[::-1]))
+        weights = weights.max() - weights
+        weights *= (max_heights - max_heights.min())**6
+
+        yz_line = np.polynomial.Polynomial.fit(bins, max_heights, 1, w=weights)
+        yz_forward_tangent = normalize_vector([1, yz_line.deriv()(0)])
+        new_forwards_3d = normalize_vector(
+            yz_forward_tangent[0] * self.forward \
+            + yz_forward_tangent[1] * self.occlusal)
+
+        axisY = normalize_vector(np.cross(new_forwards_3d, self.right))
+        self._axisY = axisY
+        self._axisZ = new_forwards_3d
+
+

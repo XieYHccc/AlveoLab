@@ -10,7 +10,7 @@ import networkx as nx
 import trimesh as tm
 
 from AlveoLab.utils import get_logger, logging, now
-from AlveoLab.orienter.orienter import Orienter
+from AlveoLab.orienter.obb_orienter import ObbOrienter
 from AlveoLab.trimesh_utils import get_face_face_adjacency, get_edge_based_curvature
 from AlveoLab.geometry import normalize_vector
 
@@ -65,7 +65,7 @@ class CleftClassifier:
 
         # 1. orientate the mesh and move mesh to the origin
         step_start = now()
-        self._orienter = Orienter(self._mesh)
+        self._orienter = ObbOrienter(self._mesh)
         self._mesh.apply_transform(self._orienter.to_origin_transform_matrix)
         step_end = now()
         logger.debug("Orient dental model in %0.4fs", step_end - step_start)

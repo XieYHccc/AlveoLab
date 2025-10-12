@@ -6,13 +6,58 @@ from pyvista import plotting
 
 from AlveoLab.orienter.pca_orienter import PcaOrienter
 
+def visualize_adjust_axis_y_to_tips(points, forward, occlusal):
+    """
+    可视化：bin 里的最大高度 + 拟合直线
+    - 参数:
+        points   : (N,3) 点云，例如 mesh.triangles_center
+        forward  : (3,) 向量，forward 方向
+        occlusal : (3,) 向量，occlusal 方向
+    """
+    ys = np.dot(points, forward)
+    heights = np.dot(points, occlusal)
+
+    min_height = heights.min()
+    bins = np.arange(ys.min() - 1, ys.max() + 1)
+    args = np.digitize(ys, bins)
+    args = np.clip(args, 0, len(bins)-1)
+
+    # 每个 bin 的最大高度
+    max_heights = np.full_like(bins, min_height, dtype=float)
+    np.maximum.at(max_heights, args, heights)
+
+    # 权重
+    weights = np.abs(bins - bins[::-1])
+    weights = weights.max() - weights
+    weights *= (max_heights - max_heights.min())**6
+
+    # 加权拟合直线
+    yz_line = np.polynomial.Polynomial.fit(bins, max_heights, 1, w=weights)
+    slope = yz_line.deriv()(0)
+
+    # ---- 绘图 ----
+    plt.figure(figsize=(8,6))
+    sc = plt.scatter(bins, max_heights, c=weights, cmap="viridis", s=60,
+                     label="Max heights (colored by weight)")
+    x_line = np.linspace(bins.min(), bins.max(), 200)
+    plt.plot(x_line, yz_line(x_line), "r-", linewidth=2,
+             label=f"Fitted line (slope={slope:.3f})")
+
+    plt.colorbar(sc, label="Weight")
+    plt.xlabel("Forward projection (y bins)")
+    plt.ylabel("Occlusal height (max per bin)")
+    plt.title("Bin max heights and fitted line")
+    plt.legend()
+    plt.grid(True)
+    plt.show()
+
 if __name__ == '__main__':
     mesh: tm.Trimesh = tm.load_mesh('../data/1JMandibular_export.stl')
-    orienter = PcaOrienter(mesh)
-    mesh.apply_transform(orienter.to_origin_transform_matrix)
+    orienter = PcaOrienter(mesh, 'L')
+    # mesh.apply_transform(orienter.to_origin_transform_matrix)
 
     # fit the dental arch
-    weights = np.dot(mesh.triangles_center, orienter.up)
+    weights = np.dot(mesh.triangles_center, orienter.occlusal)
     weights -= np.min(weights)  # make sure the weights are positive
     weights = weights ** 5
 
@@ -49,7 +94,9 @@ if __name__ == '__main__':
     pv_mesh.cell_data["colors"] = colors
     plotter.add_mesh(pv_mesh, scalars='colors', rgb=True, opacity=1.0, specular=0.4, specular_power=10, ambient=0.2)
 
-    arrow_start = mesh.centroid + (orienter.up * 7) + (orienter.forward * -5)
+    # arrow_start = orienter.center + (orienter.up * 7) + (orienter.forward * -5)
+    arrow_start = orienter.center
+
     arrow_up = pv.Arrow(arrow_start, orienter.up, scale=6)
     arrow_right = pv.Arrow(arrow_start, orienter.right, scale=6)
     arrow_forward = pv.Arrow(arrow_start, orienter.forward, scale=6)
@@ -70,3 +117,4 @@ if __name__ == '__main__':
     ], bcolor="gray", face=pv.Arrow(), loc="upper right", size=(0.2, 0.2))
 
     plotter.show()
+    #visualize_adjust_axis_y_to_tips(mesh.triangles_center, orienter.forward, orienter.occlusal)

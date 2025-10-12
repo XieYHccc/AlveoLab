@@ -62,3 +62,23 @@ def get_edge_based_curvature(mesh: Trimesh, get_map=False):
         return curvature, curvature_map
 
     return curvature
+
+def get_local_maximum_along_dir(mesh, direction) -> np.ndarray :
+    # create the vertex mask to be returned
+    # init one to all vertex
+    mask = np.ones(len(mesh.vertices), dtype=bool)
+
+    # calculate height for all vertex
+    #direction_mat = direction.reshape(-1, 1)
+    heights = np.dot(mesh.vertices, direction)
+    # get idx (= 0,1,2) with the maximum value in each face
+    heights_per_face = heights[mesh.faces]
+    max_idx = np.argmax(heights_per_face, axis=1)
+    # get non-max vertex index
+    non_max_mask = np.ones_like(mesh.faces, dtype=bool)
+    non_max_mask[np.arange(mesh.faces.shape[0]), max_idx] = 0
+    non_max_idx = mesh.faces[non_max_mask]
+
+    mask[non_max_idx] = 0
+    mask = np.nonzero(mask)[0]
+    return mask

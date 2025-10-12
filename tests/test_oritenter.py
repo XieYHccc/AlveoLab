@@ -4,11 +4,11 @@ import pyvista as pv
 import matplotlib.pyplot as plt
 from pyvista import plotting
 
-from AlveoLab.orienter.orienter import Orienter
+from AlveoLab.orienter.obb_orienter import ObbOrienter
 
 if __name__ == '__main__':
     mesh: tm.Trimesh = tm.load_mesh('../data/unilateral/0281_3 M_Maxillary_export.stl')
-    orienter = Orienter(mesh)
+    orienter = ObbOrienter(mesh)
     mesh.apply_transform(orienter.to_origin_transform_matrix)
 
     # fit the dental arch
@@ -49,7 +49,8 @@ if __name__ == '__main__':
     pv_mesh.cell_data["colors"] = colors
     plotter.add_mesh(pv_mesh, scalars='colors', rgb=True, opacity=1.0, specular=0.4, specular_power=10, ambient=0.2)
 
-    arrow_start = mesh.centroid + (orienter.up * 7) + (orienter.forward * -5)
+    #arrow_start = mesh.centroid + (orienter.up * 7) + (orienter.forward * -5)
+    arrow_start = orienter.center
     arrow_up = pv.Arrow(arrow_start, orienter.up, scale=6)
     arrow_right = pv.Arrow(arrow_start, orienter.right, scale=6)
     arrow_forward = pv.Arrow(arrow_start, orienter.forward, scale=6)

@@ -6,7 +6,7 @@ from AlveoLab.orienter._base_orienter import BaseOrienter
 from AlveoLab.geometry import normalize_vector
 
 
-class Orienter(BaseOrienter):
+class ObbOrienter(BaseOrienter):
     """
     Find the orientation of a dental mesh model by computing the mesh's oriented bounding box
     """

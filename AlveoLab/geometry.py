@@ -41,4 +41,3 @@ def center_of_mass(points, weights=None):
     else:
         weights = weights[(...,) + (np.newaxis,) * (points.ndim - weights.ndim)]
         return np.array([i.sum() for i in (points * weights).T]) / weights.sum()
-
