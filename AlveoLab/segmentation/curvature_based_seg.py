@@ -1,90 +1,101 @@
-import time
 import numpy as np
 import queue
-import trimesh
+import collections
 
+from AlveoLab.utils import LazyAttribute
 from AlveoLab.trimesh_utils import get_edge_based_curvature, get_face_face_adjacency
-import matplotlib.pyplot as plt
 from AlveoLab.orienter.pca_orienter import PcaOrienter
+from AlveoLab.geometry import normalize_vector
 
 class CurvatureBasedSeg:
+    _MAX_COST = 1.65
+    _MAX_SPREAD_WIDTH = 10
+    _MAX_SPREAD_HEIGHT = 12
 
-    _mesh: trimesh.Trimesh
-    _orienter: PcaOrienter
-    _curvature: np.ndarray
-    _curvature_per_triangle: np.ndarray
-    _peaks_idx: np.ndarray           # the indices of peaks
-    _peak_masks: {}                  # peak_id : triangle_mask
-    _peak_costs: {}                  # peak_id : accumulative cost to each triangle
-    _peak_groups: []                 # each element is a ndarray containing peaks whose spreading region are overlap
-    _overlap_mask: np.ndarray        # overlap_mask[i, j] = do peaks[i] and peaks[j] overlap?
+    @LazyAttribute
+    def tri2tri_costs(self):
+        """The costs, based on curvature, of moving from each triangle to each of it's adjacent
+        triangles. It is an array of shape (number of triangles, 3). Triangles are referenced by
+        argument based on the order they are listed in the original mesh.
+        """
+        # We are only looking for the crease where tooth meets gum. Creases / slots / grooves are
+        # represented with a negative sign in `mesh.curvature.signed` whereas bumps have positive
+        # sign. .clip(max=0) sets all positive values to 0.
+        creases_only = -self._curvature_per_triangle.clip(max=0)
 
-    _MAX_COST = 2.0
-    _MAX_SPREAD_WIDTH = 6
-    _MAX_SPREAD_HEIGHT = 5
-
-    @property
-    def curvature(self):
-        return self._curvature
-
-    @property
-    def curvature_per_triangle(self):
-        return self._curvature_per_triangle
+        # An L2 norm seemed to work well, hence the square.
+        # return np.ascontiguousarray((creases_only ** 2).clip(max=self._MAX_COST * 1.1))
+        return creases_only.clip(max=self._MAX_COST * 1.1)
 
     @property
-    def mask(self):
+    def peak_region_mask(self):
         return self._peak_masks
 
-    def plot_curvature_hist(self):
-        plt.hist(self._curvature, bins=30)
-        plt.show()
+    @property
+    def discarded_peaks_all(self):
+        """Contains all the peak args that we don't want. It comes from flattening
+        `self.discarded_peaks`. Any group that contains any of these should be removed. """
+        return set.union(*self._discarded_peaks.values())
 
-    def plot_peak_spread_region(self, peak_idx):
-        self._mesh.visual.face_colors[self._peak_masks[peak_idx]] = trimesh.visual.random_color()
+    @property
+    def valid_peaks(self):
+        filtered_peaks = np.array(
+            [peak for peak in self._peak_indices if peak not in self.discarded_peaks_all])
+        return filtered_peaks
 
-    def plot_spread_regions(self):
-        # mask = np.array([value for value in self._peak_masks.values()])
-        # mask = np.bitwise_or.reduce(mask, axis=0)
-        # self._mesh.visual.face_colors[mask] = [255, 0, 0, 255]
-        for peak in self._peaks_idx:
-            self.plot_peak_spread_region(peak)
+    @property
+    def group_region_mask(self):
+        return self._group_region_masks
 
-    def plot_group_regions(self):
-        for group in self._peak_groups:
-            mask = [self._peak_masks[peak_] for peak_ in self._peaks_idx[group]]
-            mask = np.bitwise_or.reduce(mask, axis=0)
-            self._mesh.visual.face_colors[mask] = trimesh.visual.random_color()
+    # def plot_curvature_hist(self):
+    #     plt.hist(self._curvature, bins=30)
+    #     plt.show()
+    #
+    # def plot_peak_spread_region(self, peak_idx):
+    #     self._mesh.visual.face_colors[self._peak_masks[peak_idx]] = trimesh.visual.random_color()
+    #
+    # def plot_spread_regions(self):
+    #     # mask = np.array([value for value in self._peak_masks.values()])
+    #     # mask = np.bitwise_or.reduce(mask, axis=0)
+    #     # self._mesh.visual.face_colors[mask] = [255, 0, 0, 255]
+    #     for peak in self._peak_indices:
+    #         self.plot_peak_spread_region(peak)
 
-    def __init__(self, mesh, orienter, peaks_idx):
+    # def plot_group_regions(self):
+    #     for group in self._peak_groups:
+    #         mask = [self._peak_masks[peak_] for peak_ in self._peak_indices[group]]
+    #         mask = np.bitwise_or.reduce(mask, axis=0)
+    #         self._mesh.visual.face_colors[mask] = trimesh.visual.random_color()
+
+    def __init__(self, mesh, orienter: PcaOrienter, peaks_idx):
         self._mesh = mesh
         self._orienter = orienter
-        self._peaks_idx = peaks_idx
+        self._peak_indices = peaks_idx
+        self._peak_points = mesh.vertices[peaks_idx]
         self._faces_adj = get_face_face_adjacency(self._mesh)
-        self._peak_masks = {}
-        self._peak_costs = {}
-        self._peak_groups = []
+        self._peak_masks = {}  # peak_id : triangle_mask
+        self._peak_costs = {}  # peak_id : accumulative cost to each triangle
+        # self._filtered_peaks = None  # peaks after removing unwanted peaks
+        self._group_region_masks = {}  # group_id(frozenset) : triangle_mask
 
-        t0 = time.time()
+        self._discarded_peaks = collections.defaultdict(set)
+        self._discarded_overlap_groups = collections.defaultdict(list)  # peaks that are considered as rugae
+
         self._run()
-        run_time = time.time() - t0
-        print(run_time)
 
     def _run(self):
         self._calculate_curvature()
         self._spread_from_peaks()
         self._group_overlap_region()
+        self._remove_peaks_on_rugae()
 
     def _calculate_curvature(self):
         self._curvature, self._curvature_per_triangle = \
             get_edge_based_curvature(self._mesh, get_map=True)
 
     def _spread_from_peaks(self):
-
-        tri2tri_costs = -self._curvature_per_triangle.clip(max=0)
-
-        # self._spread_from_peak(self._peaks_idx[2], tri2tri_costs)
-        for peak in self._peaks_idx:
-            self._spread_from_peak(peak, tri2tri_costs)
+        for peak in self._peak_indices:
+            self._spread_from_peak(peak, self.tri2tri_costs)
 
     def _spread_from_peak(self, peak_idx, costs):  # core region growing algorithm
         peak_triangles = np.where(self._mesh.faces == peak_idx)[0]
@@ -95,7 +106,7 @@ class CurvatureBasedSeg:
 
         # init queue and shortest flags
         is_shortest = np.zeros(self._mesh.faces.shape[0], dtype=bool)  # 1 means the face's minimum accumulative cost
-        faces_init = self._faces_adj[peak_triangles].reshape(-1)       # has been got
+        faces_init = self._faces_adj[peak_triangles].reshape(-1)  # has been got
         que = queue.PriorityQueue()
         [que.put((accumulative_cost[face], face)) for face in faces_init]
 
@@ -109,20 +120,76 @@ class CurvatureBasedSeg:
 
                 # make sure the region won't spread too widely
                 face_center = self._mesh.triangles_center[face]
-                width = abs(np.inner(self._orienter.right, face_center - self._mesh.vertices[peak_idx]))
+                width1 = abs(np.inner(self._orienter.right, face_center - self._mesh.vertices[peak_idx]))
+                width2 = abs(np.inner(self._orienter.forward, face_center - self._mesh.vertices[peak_idx]))
                 height = abs(np.inner(self._orienter.occlusal, face_center - self._mesh.vertices[peak_idx]))
-                if width > self._MAX_SPREAD_WIDTH or height > self._MAX_SPREAD_HEIGHT:
-                    continue
+                if width1 > self._MAX_SPREAD_WIDTH or width2 > self._MAX_SPREAD_WIDTH or height > self._MAX_SPREAD_HEIGHT:
+                    # this peak beyond the max spreading range, discard it
+                    # self._discarded_spilled_peaks.append(peak_idx)
+                    self._discarded_peaks['Spilled Peaks'].add(peak_idx)
+                    return
+                    # continue
 
                 face_adj = self._faces_adj[face]
                 edges_cost_adj = costs[face]
                 for i, face_ in enumerate(face_adj):
-                    if accumulative_cost[face]+edges_cost_adj[i] < accumulative_cost[face_]:
-                        accumulative_cost[face_] = accumulative_cost[face]+edges_cost_adj[i]
+                    if accumulative_cost[face] + edges_cost_adj[i] < accumulative_cost[face_]:
+                        accumulative_cost[face_] = accumulative_cost[face] + edges_cost_adj[i]
                         que.put((accumulative_cost[face_], face_))
 
         self._peak_costs[peak_idx] = accumulative_cost
         self._peak_masks[peak_idx] = is_shortest
+
+    def _remove_peaks_on_rugae(self):
+        """
+        Any tooth should have both a lingual and a buccal side, or for very
+        slanted teeth, at least a significant variance. The groups on the rugae
+        will all face only palatally so will be rejected by this rule.
+        """
+        # 1. fit a quadratic curve to all spread regions
+        all_region_mask = np.zeros_like(self._peak_masks[self.valid_peaks[0]], dtype=bool)
+
+        for p in self.valid_peaks:
+            all_region_mask |= self._peak_masks[p]
+        triangle_centers = self._mesh.triangles_center[all_region_mask]
+        x, y = (np.dot((triangle_centers - self._orienter.center), e)
+                for e in (self._orienter.right, self._orienter.forward))
+
+        # prioritise the more occlusal points
+        weights = np.dot(triangle_centers, self._orienter.occlusal)
+        weights -= np.min(weights)
+        weights = weights ** 5
+
+        poly = np.polynomial.Polynomial.fit(x, y, 2, w=weights)
+        deriv = poly.deriv()
+
+        # 2. check each group's region
+        groups_to_remove = []
+        for group, mask in self._group_region_masks.items():
+            center = self._mesh.triangles_center[mask].mean(axis=0)
+            deriv_at_peak = deriv((center - self._orienter.center) @ self._orienter.right)
+            # tangent in right–forward plane
+            tangent = normalize_vector(
+                deriv_at_peak * self._orienter.forward + self._orienter.right
+            )
+            # normal (approx lingual) direction
+            approx_lingual_dir = normalize_vector(np.cross(tangent, self._orienter.occlusal))
+            region_faces = np.where(mask)[0]
+            region_normals = self._mesh.face_normals[region_faces]
+            dot = np.dot(region_normals, approx_lingual_dir)
+            num_buccal_face = dot[dot < -0.7].shape[0]
+            num_lingual_face = dot[dot > 0.7].shape[0]
+            buccal_ratio = num_buccal_face / region_faces.shape[0]
+            lingual_ratio = num_lingual_face / region_faces.shape[0]
+            if buccal_ratio < 0.05 or (1 - lingual_ratio - buccal_ratio) > 0.9:
+                self._discarded_overlap_groups[group] = mask
+                groups_to_remove.append(group)
+        for group in groups_to_remove:
+            self._group_region_masks.pop(group)
+
+        # flatten 所有要删的 peaks
+        peaks_to_remove = set().union(*groups_to_remove)
+        self._discarded_peaks['Rugae Peaks'] = peaks_to_remove
 
     def _group_overlap_region(self):
         """
@@ -132,32 +199,49 @@ class CurvatureBasedSeg:
         It allows indirect groups. i.e. If peaks[0] overlaps with peaks[1] and peaks[1] overlaps
         with peaks[2] but peaks[0] doesn't overlap with peaks[2] then they are all grouped
         together anyway.
-
-        Peaks in `self.discarded_args` are still included here. This helps to filter away
-        unwanted peaks later.
         """
 
-        # `overlap_mask` is a square bool array.
-        # `overlap_mask[i, j]` = do peaks[i] and peaks[j] overlap?
-        n_peak = len(self._peaks_idx)
-        self._overlap_mask = np.zeros((n_peak, n_peak))
+        # `overlap_adjacency_matrix` is a square bool array.
+        # `overlap_adjacency_matrix[i, j]` = do peaks[i] and peaks[j] overlap?
+        filtered_peaks = self.valid_peaks
+        num_peak = len(filtered_peaks)
+        overlap_adjacency_matrix = np.zeros((num_peak, num_peak))
 
         # use double loop to judge whether two peaks' region are overlapping
-        for i in range(n_peak):
-            self._overlap_mask[i][i] = 1
-            mask1 = self._peak_masks[self._peaks_idx[i]]
-            for j in range(i+1, n_peak):
-                mask2 = self._peak_masks[self._peaks_idx[j]]
+        for i in range(num_peak):
+            overlap_adjacency_matrix[i][i] = 1
+            mask1 = self._peak_masks[filtered_peaks[i]]
+            for j in range(i + 1, num_peak):
+                mask2 = self._peak_masks[filtered_peaks[j]]
                 if np.bitwise_and(mask1, mask2).any():
-                    self._overlap_mask[i][j] = 1
-                    self._overlap_mask[j][i] = 1
+                    overlap_adjacency_matrix[i][j] = 1
+                    overlap_adjacency_matrix[j][i] = 1
 
         # convert adjacency matrix to list of groups in which each element is overlapped
-        flag = np.zeros(n_peak)
-        for i in range(n_peak):
-            if flag[i] == 1:
+        flag = np.zeros(num_peak, dtype=bool)
+        for i in range(num_peak):
+            if flag[i]:
                 continue
-            indices = np.where(self._overlap_mask[i] == 1)
-            group = np.unique(np.where(self._overlap_mask[indices] == 1)[1].reshape(-1))
-            flag[indices] = 1
-            self._peak_groups.append(group)
+            connected = np.where(overlap_adjacency_matrix[i] == 1)[0]
+            group_local = np.unique(np.where(overlap_adjacency_matrix[connected] == 1)[1])
+            group = frozenset(filtered_peaks[group_local])
+            flag[connected] = True
+
+            merged_mask = np.zeros_like(self._peak_masks[filtered_peaks[0]], dtype=bool)
+            for idx in group:
+                merged_mask |= self._peak_masks[idx]
+            self._group_region_masks[group] = merged_mask
+
+    def _build_quadratic(self):
+        """Build the quadratic (approximation of the jaw line) fitting to the point of each peak
+        that isn't `spilled`. Use the quadratic to sort and enumerate the peaks (including the
+        spilled ones) by their position along the quadratic. Modify `self.peaks` and
+        `self.peak_points` to reflect the reordering.
+        """
+
+
+
+
+
+
+

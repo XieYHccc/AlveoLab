@@ -159,7 +159,7 @@ class PcaOrienter(BaseOrienter):
 
         # If x² coefficient is positive:
         if poly.convert().coef[2] > 0:
-            # Flip eY
+            # Flip eZ
             self._axisZ = -self._axisZ
 
     def _check_axis_x_sign(self):

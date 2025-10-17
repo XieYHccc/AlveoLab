@@ -6,6 +6,7 @@ from pyvista import plotting
 
 from AlveoLab.orienter.pca_orienter import PcaOrienter
 
+
 def visualize_adjust_axis_y_to_tips(points, forward, occlusal):
     """
     可视化：bin 里的最大高度 + 拟合直线
@@ -51,9 +52,24 @@ def visualize_adjust_axis_y_to_tips(points, forward, occlusal):
     plt.grid(True)
     plt.show()
 
+
+def visualize_fitted_dental_arch(pca_orienter):
+
+    poly = pca_orienter.fitted_gum_curve
+
+    # draw the curve
+    x = np.linspace(np.min(mesh.triangles_center[:, 0]), np.max(mesh.triangles_center[:, 0]), 100)
+    y = poly(x)
+    plt.plot(x, y, color='red')
+
+    # draw mesh point cloud
+    plt.scatter(mesh.triangles_center[:, 0], -mesh.triangles_center[:, 2], cmap='viridis', marker='.', s=0.3, c=weights)
+    plt.colorbar()
+    plt.show()
+
 if __name__ == '__main__':
-    mesh: tm.Trimesh = tm.load_mesh('../data/1JMandibular_export.stl')
-    orienter = PcaOrienter(mesh, 'L')
+    mesh: tm.Trimesh = tm.load_mesh('../data/models10y/0611_10yr_Maxillary_export.stl')
+    orienter = PcaOrienter(mesh, 'U')
     # mesh.apply_transform(orienter.to_origin_transform_matrix)
 
     # fit the dental arch
@@ -72,7 +88,7 @@ if __name__ == '__main__':
     # draw mesh point cloud
     plt.scatter(mesh.triangles_center[:, 0], -mesh.triangles_center[:, 2], cmap='viridis', marker='.', s=0.3, c=weights)
     plt.colorbar()
-    # plt.show()
+    plt.show()
 
     # plotting
     # -------------------------

@@ -30,22 +30,29 @@ def plot_horizontal_hull(lr : LandmarkRecognizer):
 
 def get_spread_regions_color(lr : LandmarkRecognizer):
     # assign random colors to each peak region
-    num_peaks = len(lr._seg._peaks_idx)
+    num_peaks = len(lr._peak_indices)
+    num_groups = len(lr._group_region_mask)
+
     peak_colors = np.random.rand(num_peaks, 3)
 
     # assign colors to each face based on the peak region it belongs to
     face_colors = np.ones((lr._mesh.faces.shape[0], 3))
-    for i, peak_idx in enumerate(lr._seg._peaks_idx):
-        mask = lr._seg._peak_masks[peak_idx]
+    for i, (key, val) in enumerate(lr._group_region_mask.items()):
+        mask = lr._group_region_mask[key]
         face_colors[mask] = peak_colors[i]
+
+    # for i, (key, val) in enumerate(lr._seg.peak_region_mask.items()):
+    #     mask = lr._seg.peak_region_mask[key]
+    #     face_colors[mask] = peak_colors[i]
+
 
     return face_colors, peak_colors
 
 if __name__ == '__main__':
     #mesh: tm.Trimesh = tm.load_mesh('../data/1JMandibular_export.stl')
-    mesh: tm.Trimesh = tm.load_mesh('../data/models10y/0580_10yr_Mandibular_export.stl')
+    mesh: tm.Trimesh = tm.load_mesh('../data/models10y/0611_10yr_Maxillary_export.stl')
 
-    landmark_recognizer = LandmarkRecognizer(mesh, 'L')
+    landmark_recognizer = LandmarkRecognizer(mesh, 'U')
 
     # plotting
     # -------------------------

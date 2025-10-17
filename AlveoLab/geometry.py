@@ -21,6 +21,7 @@ def normalize_vector(vec):
         return vec  # 如果是零向量，直接返回原始向量
     return vec / norm
 
+
 def center_of_mass(points, weights=None):
     """
     The (weighted) mean of **points**.
@@ -41,3 +42,10 @@ def center_of_mass(points, weights=None):
     else:
         weights = weights[(...,) + (np.newaxis,) * (points.ndim - weights.ndim)]
         return np.array([i.sum() for i in (points * weights).T]) / weights.sum()
+
+
+def real_and_bounded(x, lb=0, ub=1):
+    mask = x.imag == 0
+    mask &= x.real >= lb
+    mask &= x.real <= ub
+    return x.real[mask]
