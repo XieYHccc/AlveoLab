@@ -60,7 +60,6 @@ class LandmarkRecognizer:
         self._horizontal_hull = None
 
         self._seg = None
-        self._spilled_peaks_indices = []
         self._group_region_mask = {}
 
         self._run()
@@ -175,11 +174,11 @@ class LandmarkRecognizer:
 
     def _segment_teeth(self):
         self._seg = CurvatureBasedSeg(self._mesh, self._orienter, self._peak_indices)
-        # self._spilled_peaks_indices = self._seg.spilled_peaks
+        self._discarded_peaks.update(self._seg.discarded_peaks)
 
         # update peak indices after segmentation, spilled peaks are removed
         self._peak_indices = self._seg.valid_peaks
-        self._group_region_mask = self._seg.group_region_mask
+        self._group_region_mask = self._seg._group_region_masks
 
     def _label_teeth(self):
         pass

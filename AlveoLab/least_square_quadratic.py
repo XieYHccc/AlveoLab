@@ -1,8 +1,9 @@
 import numpy as np
 from numpy.polynomial import Polynomial
 
-from AlveoLab.geometry import normalize_vector, real_and_bounded
-from AlveoLab.utils import LazyAttribute
+from AlveoLab.math.geometry import normalize_vector, real_and_bounded, stagger, inner_product
+from AlveoLab.utils import LazyAttribute, zip_axes, unzip_axes, copy_name_wrapper
+from AlveoLab.kdtree import KDTree
 
 
 class QuadraticFit(object):
@@ -13,19 +14,6 @@ class QuadraticFit(object):
         self.quadratic = Polynomial.fit(self.x, self.y, deg=2, w=weights).convert()
 
         self.derivative = self.quadratic.deriv()
-        self._nearest_point_on_quadratic_cache = {}
-
-        #self.tip = self.get_tip()
-        #self.height = self.get_height()
-
-        #for (i, (x, y)) in enumerate(self.points):
-        #    self.nearest_points_on_quadratic[i] = self.nearest_point_on_quadratic(x, y)
-        #        #self.nearest_points_on_quadratic = np.empty_like(self.points)
-
-        #self.buccals = self.buccal_at(self.nearest_points_on_quadratic[..., 0])
-        #self.distals = self.distal_at(self.nearest_points_on_quadratic[..., 0])
-
-        #self.sort()
 
     def sort(self):
         args = np.argsort(self.nearest_points_on_quadratic[:, 0])
@@ -39,8 +27,6 @@ class QuadraticFit(object):
         ]:
             setattr(self, attr, getattr(self, attr)[args])
         return args
-
-    #@nuts_and_bolts.cached("_nearest_point_on_quadratic_cache")
 
     def nearest_point_on_quadratic(self, x, y):
         assert np.isscalar(y)
@@ -97,13 +83,13 @@ class QuadraticFit(object):
         t1 = self.nearest_point_on_quadratic(x1, y1)[0]
         t = np.linspace(t0, t1, n)
 
-        r0 = geom.inner_product([x0 - t0, y0 - self(t0)], geom.normalised(self.buccal_at(t0)))
-        r1 = geom.inner_product([x1 - t1, y1 - self(t1)], geom.normalised(self.buccal_at(t1)))
+        r0 = inner_product([x0 - t0, y0 - self(t0)], normalize_vector(self.buccal_at(t0)))
+        r1 = inner_product([x1 - t1, y1 - self(t1)], normalize_vector(self.buccal_at(t1)))
 
         dt = t1 - t0
         radii = (t1 - t) / dt * r0 + (t - t0) / dt * r1
         buccals = self.buccal_at(t)
-        tangents = self.tangent_at(sum(geom.stagger(t)) / 2)
+        tangents = self.tangent_at(sum(stagger(t)) / 2)
         x = t + radii * buccals[:, 0]
         y = self(t) + radii * buccals[:, 1]
         #        plt.plot(x, y)
@@ -169,7 +155,7 @@ class QuadraticFit(object):
 
         to_neighbour = np.array([
             self.get_distance_between_points(x0, x1, y0, y1)
-            for ((x0, y0), (x1, y1)) in zip(*geom.stagger(points))
+            for ((x0, y0), (x1, y1)) in zip(*stagger(points))
         ])
 
         cs_1d = np.empty(len(points), points.dtype)
@@ -178,3 +164,134 @@ class QuadraticFit(object):
 
         dist_map = cs_1d - cs_1d[:, np.newaxis]
         return dist_map
+
+
+class FuzzyQuadraticFit(QuadraticFit):
+    def __init__(self, x, y, weights=None, resolution=200):
+        super().__init__(x, y, weights)
+        self.resolution = resolution
+        self.tree_points = np.empty((resolution, 2))
+        xs = self.tree_points[:, 0] = np.linspace(x.min(), x.max(), resolution)
+        self.tree_points[:, 1] = self(self.tree_points[:, 0])
+        self.tree = KDTree(self.tree_points)
+        self.nearest_points = self.tree_points[self.tree.query(self.points)[1]]
+
+        distances = inner_product(self.buccal_at(self.nearest_points[:, 0]),
+                                       self.points - self.nearest_points)
+        sort_args = self.nearest_points[:, 0].argsort()
+        wiggly_points = (
+            self.tree_points + self.buccal_at(xs) *
+            np.interp(xs, self.nearest_points[sort_args, 0], distances[sort_args])[:, np.newaxis])
+
+        self.lengths = np.empty_like(wiggly_points[:, 0])
+        self.lengths[0] = 0
+        inner_product(np.diff(wiggly_points, axis=0), self.tangent_at(
+            (xs[:-1] + xs[1:]) / 2)).cumsum(out=self.lengths[1:])
+
+    def get_distance_map(self, points=None):
+        if points is None:
+            points = self.points
+        # TODO: sort this so that out of range points are handles properly.
+        lengths = self.lengths[self.tree.query(points)[1]]
+        return lengths - lengths[:, np.newaxis]
+
+    def nearest_point_on_quadratic(self, x, y):
+        args = self.tree.query(zip_axes(x, y))[1]
+        return unzip_axes(self.tree_points[args])
+
+    def get_distance_between_points(self, x0, x1, y0, y1, n=50):
+        i, j = self.tree.query([[x0, y0], [x1, y1]])[1]
+        return -self.lengths[i] + self.lengths[j]
+
+
+class Quadratic3D(object):
+    def __init__(self, points, orienter, weights=None, fuzzy_resolution=None):
+        assert len(points)
+        self.orienter = orienter
+        self.to_2d = self.orienter.to_horizontal
+        self.points_2d = self.to_2d(points)
+
+        x, y = self.points_2d.T
+
+        if fuzzy_resolution is None:
+            self.quadratic_2d = QuadraticFit(x, y, weights=weights)
+        else:
+            self.quadratic_2d = FuzzyQuadraticFit(*self.points_2d, weights=weights,
+                                                  resolution=fuzzy_resolution)
+
+        self.height = self.orienter.up * inner_product(self.orienter.up, np.mean(points, 0))
+        self.points = points
+
+        #self.distals = self.to_3d(*self.quadratic_2d.distals.T)
+        #self.buccals = self.to_3d(*self.quadratic_2d.buccals.T)
+
+    def sort(self):
+        reorder_args = self.quadratic_2d.sort()
+        for attr in ["points", "buccals", "distals"]:
+            setattr(self, attr, getattr(self, attr)[reorder_args])
+        return reorder_args
+
+    def to_3d(self, points_2d, add_z=False):
+        out = self.orienter.from_horizontal(points_2d)
+        if add_z:
+            out += self.height
+        return out
+
+    @copy_name_wrapper
+    def _from_2d_method(unbound_method_2d):
+        def method_3d(self, point=None, root=None):
+            if (root is None) == (point is None):
+                raise ValueError("Exactly one of `point` and `root` arguments must be specified")
+            if root is None:
+                root = self.get_root_at(point)
+            return self.to_3d(unbound_method_2d(self.quadratic_2d, root))
+
+        method_3d.__name__ = unbound_method_2d.__name__
+        method_3d.__qualname__ = unbound_method_2d.__qualname__
+
+        return method_3d
+
+    tangent_at = _from_2d_method(QuadraticFit.tangent_at)
+    distal_at = _from_2d_method(QuadraticFit.distal_at)
+    buccal_at = _from_2d_method(QuadraticFit.buccal_at)
+
+    def get_root_at(self, point):
+        return self.quadratic_2d.nearest_point_on_quadratic(*self.to_2d(point))[0]
+
+    # def plot(self, z=None, **plotargs):
+    #     x = np.linspace(self.points_2d[0].min(), self.points_2d[0].max())
+    #
+    #     points = self.to_3d(x, self.quadratic_2d(x), add_z=True)
+    #
+    #     if z is not None:
+    #         points = self.odom.occlusal.with_projection(points, z)
+    #
+    #     vpl.plot(points, **plotargs)
+    #
+    # def plot_distals(self, **plotargs):
+    #     vpl.quiver(self.points, self.distals, label="Distal", **plotargs)
+    #
+    # def plot_buccals(self, **plotargs):
+    #     vpl.quiver(self.points, self.buccals, label="Buccal", **plotargs)
+
+    def __call__(self, t):
+        return self.to_3d(t, self.quadratic_2d(t))
+
+    def nearest_point_on_quadratic(self, point):
+        t = self.get_root_at(point)
+        nearest = self(t)
+        return nearest
+
+    # def make_odom(self, centre_of_mass):
+    #     """Build a :class:`ToothOdometry` object based on its position given by
+    #     **centre_of_mass** and orientations derived from this quadratic.
+    #     """
+    #     from ALR import mesh_orientation
+    #
+    #     root = self.get_root_at(centre_of_mass)
+    #     return mesh_orientation.ToothOdometry(
+    #         self.distal_at(root=root),
+    #         self.buccal_at(root=root),
+    #         self.odom.occlusal,
+    #         centre_of_mass,
+    #     )

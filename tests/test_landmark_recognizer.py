@@ -7,6 +7,19 @@ from pyvista import plotting
 from AlveoLab.landmark_recognizer import LandmarkRecognizer
 from AlveoLab.pyvista_utils import get_dental_plotter
 
+def plot_quadratic(lr: LandmarkRecognizer):
+    uv = np.c_[lr._mesh.vertices @ lr._orienter.right,
+               lr._mesh.vertices @ lr._orienter.forward]
+
+    # draw the curve
+    x = np.linspace(np.min(mesh.triangles_center[:, 0]), np.max(mesh.triangles_center[:, 0]), 100)
+    y = lr._seg.quadratic.quadratic_2d(x)
+
+    plt.figure(figsize=(6, 6))
+    plt.scatter(uv[:, 0], uv[:, 1], s=2, alpha=0.25, label="all vertices")
+    plt.plot(x, y, color='red')
+    plt.show()
+
 def plot_horizontal_hull(lr : LandmarkRecognizer):
     uv = np.c_[lr._mesh.vertices @ lr._orienter.right,
                lr._mesh.vertices @ lr._orienter.forward]
@@ -37,8 +50,11 @@ def get_spread_regions_color(lr : LandmarkRecognizer):
 
     # assign colors to each face based on the peak region it belongs to
     face_colors = np.ones((lr._mesh.faces.shape[0], 3))
-    for i, (key, val) in enumerate(lr._group_region_mask.items()):
-        mask = lr._group_region_mask[key]
+    # for i, (key, val) in enumerate(lr._group_region_mask.items()):
+    #     mask = lr._group_region_mask[key]
+    #     face_colors[mask] = peak_colors[i]
+    for i, group in enumerate(lr._seg.overlapping_area_groups):
+        mask = group.mask
         face_colors[mask] = peak_colors[i]
 
     # for i, (key, val) in enumerate(lr._seg.peak_region_mask.items()):
@@ -77,3 +93,4 @@ if __name__ == '__main__':
 
     #plot_horizontal_hull(landmark_recognizer)
     #plot_spread_regions(landmark_recognizer)
+    plot_quadratic(landmark_recognizer)

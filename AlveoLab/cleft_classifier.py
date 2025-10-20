@@ -11,8 +11,8 @@ import trimesh as tm
 
 from AlveoLab.utils import get_logger, logging, now
 from AlveoLab.orienter.obb_orienter import ObbOrienter
-from AlveoLab.trimesh_utils import get_face_face_adjacency, get_edge_based_curvature
-from AlveoLab.geometry import normalize_vector
+from AlveoLab.trimesh_utils import get_face_face_adjacency
+from AlveoLab.math.geometry import normalize_vector
 
 logger = get_logger("cleft_classifier.py", level=logging.DEBUG)
 

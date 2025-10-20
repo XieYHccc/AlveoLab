@@ -1,7 +1,7 @@
 from abc import ABC, abstractmethod
 import numpy as np
 from trimesh import Trimesh
-
+import AlveoLab.math.geometry as geom
 
 class BaseOrienter(ABC):
     """
@@ -76,3 +76,48 @@ class BaseOrienter(ABC):
     def to_origin_transform_matrix(self):
         """Transformation matrix to move the center of the bounding box to the origin."""
         pass
+
+    def to_horizontal(self, points) -> np.ndarray:
+        """Extract the horizontal components of some **points**.
+
+        More precisely, find the projections in the directions :attr:`right`
+        and :attr:`forwards`.
+
+        Args:
+            points: A point, array of points, array of arrays of points etc.
+        Returns:
+            Horizontal components. An array with :py:`.shape[-1] == 2`.
+
+        """
+        return geom.get_components_zipped(points, self.right, self.forward)
+
+    def from_horizontal(self, points_2d, up=None, occlusal=None):
+        """Reconstruct points from their horizontal projections as returned
+        by :meth:`to_horizontal`.
+
+        Args:
+            points_2d:
+                The projections in the directions :attr:`right` and
+                :attr:`forwards`. Should be an array with :py:`shape[-1] == 2`.
+            up:
+                The projection(s) in the :attr:`up` direction, defaults to
+                ``0.0``.
+            occlusal:
+                The projection(s) in the :attr:`occlusal` direction,
+                defaults to ``0.0``.
+        Returns:
+            Remapped points. An array with :py:`shape[-1] == 3`.
+
+        More fine-grained control over what happens to the vertical axis can
+        be achieved by feeding the output of this method to the
+        :meth:`~motmot.geometry.UnitVector.with_` method of :attr:`up` or
+        :attr:`occlusal`.
+
+        """
+        out = points_2d @ np.array([self.right, self.forward])
+        if up is not None:
+            out += self.up * np.array(up)[..., np.newaxis]
+        if occlusal is not None:
+            out += self.occlusal * np.array(occlusal)[..., np.newaxis]
+        return out
+

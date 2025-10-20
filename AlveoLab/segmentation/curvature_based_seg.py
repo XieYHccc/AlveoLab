@@ -2,15 +2,23 @@ import numpy as np
 import queue
 import collections
 
-from AlveoLab.utils import LazyAttribute
+import AlveoLab.math.geometry as geom
+from AlveoLab.utils import LazyAttribute, mask_or
 from AlveoLab.trimesh_utils import get_edge_based_curvature, get_face_face_adjacency
 from AlveoLab.orienter.pca_orienter import PcaOrienter
-from AlveoLab.geometry import normalize_vector
+from AlveoLab.least_square_quadratic import Quadratic3D
+from AlveoLab.segmentation.overlapping_area_group import OverlappingAreaGroup
 
 class CurvatureBasedSeg:
     _MAX_COST = 1.65
     _MAX_SPREAD_WIDTH = 10
     _MAX_SPREAD_HEIGHT = 12
+
+    # 10 year teeth
+    MAX_TOOTH_WIDTH = 15
+    MAX_PEAK_DISTANCE = 15
+    MIN_TOOTH_AREA = 5
+    MAX_TOOTH_HEIGHT = 15
 
     @LazyAttribute
     def tri2tri_costs(self):
@@ -28,14 +36,10 @@ class CurvatureBasedSeg:
         return creases_only.clip(max=self._MAX_COST * 1.1)
 
     @property
-    def peak_region_mask(self):
-        return self._peak_masks
-
-    @property
     def discarded_peaks_all(self):
         """Contains all the peak args that we don't want. It comes from flattening
         `self.discarded_peaks`. Any group that contains any of these should be removed. """
-        return set.union(*self._discarded_peaks.values())
+        return set.union(*self.discarded_peaks.values())
 
     @property
     def valid_peaks(self):
@@ -43,19 +47,15 @@ class CurvatureBasedSeg:
             [peak for peak in self._peak_indices if peak not in self.discarded_peaks_all])
         return filtered_peaks
 
-    @property
-    def group_region_mask(self):
-        return self._group_region_masks
-
     # def plot_curvature_hist(self):
     #     plt.hist(self._curvature, bins=30)
     #     plt.show()
     #
     # def plot_peak_spread_region(self, peak_idx):
-    #     self._mesh.visual.face_colors[self._peak_masks[peak_idx]] = trimesh.visual.random_color()
+    #     self._mesh.visual.face_colors[self.peak_masks[peak_idx]] = trimesh.visual.random_color()
     #
     # def plot_spread_regions(self):
-    #     # mask = np.array([value for value in self._peak_masks.values()])
+    #     # mask = np.array([value for value in self.peak_masks.values()])
     #     # mask = np.bitwise_or.reduce(mask, axis=0)
     #     # self._mesh.visual.face_colors[mask] = [255, 0, 0, 255]
     #     for peak in self._peak_indices:
@@ -63,7 +63,7 @@ class CurvatureBasedSeg:
 
     # def plot_group_regions(self):
     #     for group in self._peak_groups:
-    #         mask = [self._peak_masks[peak_] for peak_ in self._peak_indices[group]]
+    #         mask = [self.peak_masks[peak_] for peak_ in self._peak_indices[group]]
     #         mask = np.bitwise_or.reduce(mask, axis=0)
     #         self._mesh.visual.face_colors[mask] = trimesh.visual.random_color()
 
@@ -71,23 +71,24 @@ class CurvatureBasedSeg:
         self._mesh = mesh
         self._orienter = orienter
         self._peak_indices = peaks_idx
-        self._peak_points = mesh.vertices[peaks_idx]
+        # self._peak_points = mesh.vertices[peaks_idx]
         self._faces_adj = get_face_face_adjacency(self._mesh)
-        self._peak_masks = {}  # peak_id : triangle_mask
-        self._peak_costs = {}  # peak_id : accumulative cost to each triangle
-        # self._filtered_peaks = None  # peaks after removing unwanted peaks
+        self.peak_masks = {}  # peak_id : triangle_mask
+        self.peak_costs  = {}  # peak_id : accumulative cost to each triangle
+        self.overlapping_area_groups = []
         self._group_region_masks = {}  # group_id(frozenset) : triangle_mask
 
-        self._discarded_peaks = collections.defaultdict(set)
-        self._discarded_overlap_groups = collections.defaultdict(list)  # peaks that are considered as rugae
-
+        self.discarded_peaks = collections.defaultdict(set)
+        self.discarded_overlap_groups = collections.defaultdict(list)  # peaks that are considered as rugae
+        self.quadratic = None
         self._run()
 
     def _run(self):
         self._calculate_curvature()
         self._spread_from_peaks()
-        self._group_overlap_region()
-        self._remove_peaks_on_rugae()
+        self._build_quadratic()
+        self._build_overlapping_area_groups()
+        # self._remove_peaks_on_rugae()
 
     def _calculate_curvature(self):
         self._curvature, self._curvature_per_triangle = \
@@ -126,7 +127,7 @@ class CurvatureBasedSeg:
                 if width1 > self._MAX_SPREAD_WIDTH or width2 > self._MAX_SPREAD_WIDTH or height > self._MAX_SPREAD_HEIGHT:
                     # this peak beyond the max spreading range, discard it
                     # self._discarded_spilled_peaks.append(peak_idx)
-                    self._discarded_peaks['Spilled Peaks'].add(peak_idx)
+                    self.discarded_peaks['Spilled Peaks'].add(peak_idx)
                     return
                     # continue
 
@@ -137,8 +138,8 @@ class CurvatureBasedSeg:
                         accumulative_cost[face_] = accumulative_cost[face] + edges_cost_adj[i]
                         que.put((accumulative_cost[face_], face_))
 
-        self._peak_costs[peak_idx] = accumulative_cost
-        self._peak_masks[peak_idx] = is_shortest
+        self.peak_costs [peak_idx] = accumulative_cost
+        self.peak_masks[peak_idx] = is_shortest
 
     def _remove_peaks_on_rugae(self):
         """
@@ -147,10 +148,10 @@ class CurvatureBasedSeg:
         will all face only palatally so will be rejected by this rule.
         """
         # 1. fit a quadratic curve to all spread regions
-        all_region_mask = np.zeros_like(self._peak_masks[self.valid_peaks[0]], dtype=bool)
+        all_region_mask = np.zeros_like(self.peak_masks[self.valid_peaks[0]], dtype=bool)
 
         for p in self.valid_peaks:
-            all_region_mask |= self._peak_masks[p]
+            all_region_mask |= self.peak_masks[p]
         triangle_centers = self._mesh.triangles_center[all_region_mask]
         x, y = (np.dot((triangle_centers - self._orienter.center), e)
                 for e in (self._orienter.right, self._orienter.forward))
@@ -169,11 +170,11 @@ class CurvatureBasedSeg:
             center = self._mesh.triangles_center[mask].mean(axis=0)
             deriv_at_peak = deriv((center - self._orienter.center) @ self._orienter.right)
             # tangent in right–forward plane
-            tangent = normalize_vector(
+            tangent = geom.normalize_vector(
                 deriv_at_peak * self._orienter.forward + self._orienter.right
             )
             # normal (approx lingual) direction
-            approx_lingual_dir = normalize_vector(np.cross(tangent, self._orienter.occlusal))
+            approx_lingual_dir = geom.normalize_vector(np.cross(tangent, self._orienter.occlusal))
             region_faces = np.where(mask)[0]
             region_normals = self._mesh.face_normals[region_faces]
             dot = np.dot(region_normals, approx_lingual_dir)
@@ -182,16 +183,16 @@ class CurvatureBasedSeg:
             buccal_ratio = num_buccal_face / region_faces.shape[0]
             lingual_ratio = num_lingual_face / region_faces.shape[0]
             if buccal_ratio < 0.05 or (1 - lingual_ratio - buccal_ratio) > 0.9:
-                self._discarded_overlap_groups[group] = mask
+                self.discarded_overlap_groups[group] = mask
                 groups_to_remove.append(group)
         for group in groups_to_remove:
             self._group_region_masks.pop(group)
 
-        # flatten 所有要删的 peaks
+        # flatten peaks
         peaks_to_remove = set().union(*groups_to_remove)
-        self._discarded_peaks['Rugae Peaks'] = peaks_to_remove
+        self.discarded_peaks['Rugae Peaks'] = peaks_to_remove
 
-    def _group_overlap_region(self):
+    def _build_overlapping_area_groups(self):
         """
         Find all peak spreads that share area on the mesh. The peak groups are stored in
         `self.overlapping_arg_groups`, an array of sets of args.
@@ -200,37 +201,47 @@ class CurvatureBasedSeg:
         with peaks[2] but peaks[0] doesn't overlap with peaks[2] then they are all grouped
         together anyway.
         """
+        filtered_peaks = self.valid_peaks
+        num_peak = len(filtered_peaks)
 
         # `overlap_adjacency_matrix` is a square bool array.
         # `overlap_adjacency_matrix[i, j]` = do peaks[i] and peaks[j] overlap?
-        filtered_peaks = self.valid_peaks
-        num_peak = len(filtered_peaks)
         overlap_adjacency_matrix = np.zeros((num_peak, num_peak))
-
-        # use double loop to judge whether two peaks' region are overlapping
         for i in range(num_peak):
             overlap_adjacency_matrix[i][i] = 1
-            mask1 = self._peak_masks[filtered_peaks[i]]
+            mask1 = self.peak_masks[filtered_peaks[i]]
             for j in range(i + 1, num_peak):
-                mask2 = self._peak_masks[filtered_peaks[j]]
+                mask2 = self.peak_masks[filtered_peaks[j]]
                 if np.bitwise_and(mask1, mask2).any():
                     overlap_adjacency_matrix[i][j] = 1
                     overlap_adjacency_matrix[j][i] = 1
 
-        # convert adjacency matrix to list of groups in which each element is overlapped
+        # build overlapping area groups
         flag = np.zeros(num_peak, dtype=bool)
         for i in range(num_peak):
             if flag[i]:
                 continue
             connected = np.where(overlap_adjacency_matrix[i] == 1)[0]
-            group_local = np.unique(np.where(overlap_adjacency_matrix[connected] == 1)[1])
-            group = frozenset(filtered_peaks[group_local])
             flag[connected] = True
 
-            merged_mask = np.zeros_like(self._peak_masks[filtered_peaks[0]], dtype=bool)
-            for idx in group:
-                merged_mask |= self._peak_masks[idx]
-            self._group_region_masks[group] = merged_mask
+            group_peak_args = np.unique(np.where(overlap_adjacency_matrix[connected] == 1)[1])
+            group_peaks = frozenset(filtered_peaks[group_peak_args])
+            mask = mask_or(*(self.peak_masks[i] for i in group_peaks))
+            self._group_region_masks[group_peaks] = mask
+            area_group = OverlappingAreaGroup(group_peaks, mask, self._mesh, self._orienter, self.quadratic)
+
+            if area_group.width > self.MAX_TOOTH_WIDTH:
+                # Occasionally you get very long stretches of gum just beneath
+                # the incisors.
+                self.discarded_overlap_groups["Too Wide"].append(area_group)
+                self.overlapping_area_groups.append(area_group)
+            elif area_group.is_one_sided:
+                # To be a cusp of a tooth the area should have both lingual
+                # facing and buccal facing parts.
+                self.discarded_overlap_groups["Only on One Side"].append(area_group)
+                # self.overlapping_area_groups.append(area_group)
+            else:
+                self.overlapping_area_groups.append(area_group)
 
     def _build_quadratic(self):
         """Build the quadratic (approximation of the jaw line) fitting to the point of each peak
@@ -238,6 +249,25 @@ class CurvatureBasedSeg:
         spilled ones) by their position along the quadratic. Modify `self.peaks` and
         `self.peak_points` to reflect the reordering.
         """
+
+        peak_points_unspilled = np.array(self._mesh.vertices[self.valid_peaks])
+
+        assert len(peak_points_unspilled) >= 3, "Not enough valid peaks to build quadratic"
+        self.quadratic = Quadratic3D(peak_points_unspilled, self._orienter)
+
+        # This just tests "how tall is the quadratic?".
+        ys = self.quadratic.quadratic_2d.points[:, 1]
+        assert self.quadratic.quadratic_2d.height > 1.0 * ys.std()
+        """Least squares quadratic is a poor approximation of the jaw line. This
+        typically happens if there are raised areas in the centre-rear of the
+        model. Other than manually removing these areas, there is nothing that
+        can be done to fix this."""
+
+
+
+        
+
+
 
 
 

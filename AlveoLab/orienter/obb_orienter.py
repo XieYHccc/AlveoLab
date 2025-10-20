@@ -3,7 +3,7 @@ from trimesh.bounds import oriented_bounds
 from trimesh import Trimesh
 
 from AlveoLab.orienter._base_orienter import BaseOrienter
-from AlveoLab.geometry import normalize_vector
+from AlveoLab.math.geometry import normalize_vector
 
 
 class ObbOrienter(BaseOrienter):

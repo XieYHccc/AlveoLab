@@ -1,6 +1,6 @@
 import numpy as np
 
-from AlveoLab.geometry import center_of_mass
+from AlveoLab.math.geometry import center_of_mass
 class Pca(object):
     """
     Perform Principle Component Analysis (PCA) on a set of points.
