@@ -4,7 +4,7 @@ import pyvista as pv
 import matplotlib.pyplot as plt
 from pyvista import plotting
 
-from AlveoLab.orienter.pca_orienter import PcaOrienter
+from AlveoLab.orienter.pca_dental_orienter import PcaOrienter
 
 
 def visualize_adjust_axis_y_to_tips(points, forward, occlusal):

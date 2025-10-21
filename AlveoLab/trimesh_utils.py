@@ -2,7 +2,10 @@
 
 from collections import defaultdict
 from trimesh import Trimesh
+from trimesh.bounds import oriented_bounds
 import numpy as np
+
+from AlveoLab.math.oriented_bounding_box import Obb
 
 
 def get_face_face_adjacency(mesh: Trimesh):
@@ -58,7 +61,10 @@ def get_edge_based_curvature(mesh: Trimesh, get_map=False):
     if get_map:
         d = defaultdict(list)
         [(d[a].append(curvature[i]), d[b].append(curvature[i])) for i, (a, b) in enumerate(mesh.face_adjacency)]
-        curvature_map = np.array([d[i] for i in range(len(mesh.faces))])
+        curvature_map = np.array([
+            d[i] if len(d[i]) == 3 else [np.nan, np.nan, np.nan]
+            for i in range(len(mesh.faces))
+        ])
         return curvature, curvature_map
 
     return curvature
@@ -83,3 +89,10 @@ def get_local_maximum_along_dir(mesh, direction) -> np.ndarray:
     mask[non_max_idx] = 0
     mask = np.nonzero(mask)[0]
     return mask
+
+
+def get_oriented_bounding_box(mesh):
+    to_origin, extents = oriented_bounds(mesh)
+    obb = Obb(to_origin, extents)
+
+    return obb

@@ -4,7 +4,7 @@ import pyvista as pv
 import matplotlib.pyplot as plt
 from pyvista import plotting
 
-from AlveoLab.orienter.obb_orienter import ObbOrienter
+from AlveoLab.orienter.obb_dental_orienter import ObbOrienter
 
 if __name__ == '__main__':
     mesh: tm.Trimesh = tm.load_mesh('../data/unilateral/0281_3 M_Maxillary_export.stl')

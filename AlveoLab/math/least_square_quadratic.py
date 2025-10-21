@@ -3,7 +3,7 @@ from numpy.polynomial import Polynomial
 
 from AlveoLab.math.geometry import normalize_vector, real_and_bounded, stagger, inner_product
 from AlveoLab.utils import LazyAttribute, zip_axes, unzip_axes, copy_name_wrapper
-from AlveoLab.kdtree import KDTree
+from AlveoLab.math.kdtree import KDTree
 
 
 class QuadraticFit(object):

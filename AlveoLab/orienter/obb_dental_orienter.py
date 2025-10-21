@@ -24,6 +24,10 @@ class ObbOrienter(BaseOrienter):
         return self._axisZ
 
     @property
+    def occlusal(self):
+        return self.up if self.arch_type == "L" else -self.up
+
+    @property
     def center(self):
         return self._center
 

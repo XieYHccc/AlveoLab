@@ -3,7 +3,7 @@ import trimesh as tm
 import pyvista as pv
 from pyvista import plotting
 
-from AlveoLab.orienter.obb_orienter import ObbOrienter
+from AlveoLab.orienter.obb_dental_orienter import ObbOrienter
 from AlveoLab.cleft_classifier import CleftClassifier
 
 if __name__ == '__main__':

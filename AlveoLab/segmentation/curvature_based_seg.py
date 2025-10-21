@@ -5,9 +5,12 @@ import collections
 import AlveoLab.math.geometry as geom
 from AlveoLab.utils import LazyAttribute, mask_or
 from AlveoLab.trimesh_utils import get_edge_based_curvature, get_face_face_adjacency
-from AlveoLab.orienter.pca_orienter import PcaOrienter
-from AlveoLab.least_square_quadratic import Quadratic3D
+from AlveoLab.orienter.pca_dental_orienter import PcaOrienter
+from AlveoLab.math.least_square_quadratic import Quadratic3D
 from AlveoLab.segmentation.overlapping_area_group import OverlappingAreaGroup
+from AlveoLab.segmentation.tooth import Tooth
+from AlveoLab.grouping import Grouping
+
 
 class CurvatureBasedSeg:
     _MAX_COST = 1.65
@@ -15,9 +18,9 @@ class CurvatureBasedSeg:
     _MAX_SPREAD_HEIGHT = 12
 
     # 10 year teeth
-    MAX_TOOTH_WIDTH = 15
+    MAX_TOOTH_WIDTH = 13
     MAX_PEAK_DISTANCE = 15
-    MIN_TOOTH_AREA = 5
+    MIN_TOOTH_AREA = 15
     MAX_TOOTH_HEIGHT = 15
 
     @LazyAttribute
@@ -39,7 +42,24 @@ class CurvatureBasedSeg:
     def discarded_peaks_all(self):
         """Contains all the peak args that we don't want. It comes from flattening
         `self.discarded_peaks`. Any group that contains any of these should be removed. """
-        return set.union(*self.discarded_peaks.values())
+
+        discarded_peaks_all = []
+        for teeth_list in self.discarded_teeth.values():
+            for tooth in teeth_list:
+                discarded_peaks_all.append(tooth.peaks)
+
+        for group_list in self.discarded_overlap_groups.values():
+            for group in group_list:
+                discarded_peaks_all.append(group.peaks)
+
+        for v in self.discarded_peaks.values():
+            discarded_peaks_all.append(v)
+
+        if len(discarded_peaks_all) == 0:
+            return set()
+        return set.union(*discarded_peaks_all)
+
+        # return set.union(*self.discarded_peaks.values())
 
     @property
     def valid_peaks(self):
@@ -71,16 +91,20 @@ class CurvatureBasedSeg:
         self._mesh = mesh
         self._orienter = orienter
         self._peak_indices = peaks_idx
-        # self._peak_points = mesh.vertices[peaks_idx]
         self._faces_adj = get_face_face_adjacency(self._mesh)
+
         self.peak_masks = {}  # peak_id : triangle_mask
-        self.peak_costs  = {}  # peak_id : accumulative cost to each triangle
+        self.peak_costs = {}  # peak_id : accumulative cost to each triangle
+        self.overlapping_area_args = []  # list of sets of peak args
         self.overlapping_area_groups = []
-        self._group_region_masks = {}  # group_id(frozenset) : triangle_mask
+        self.inline_group_args = []
+        self.teeth = []
 
         self.discarded_peaks = collections.defaultdict(set)
         self.discarded_overlap_groups = collections.defaultdict(list)  # peaks that are considered as rugae
+        self.discarded_teeth = collections.defaultdict(list)
         self.quadratic = None
+
         self._run()
 
     def _run(self):
@@ -88,7 +112,13 @@ class CurvatureBasedSeg:
         self._spread_from_peaks()
         self._build_quadratic()
         self._build_overlapping_area_groups()
+        self._build_quadratic()
+        for group in self.overlapping_area_groups:
+            group.update_quadratic(self.quadratic)
         # self._remove_peaks_on_rugae()
+
+        self._group_inline_area_groups()
+        self._build_teeth()
 
     def _calculate_curvature(self):
         self._curvature, self._curvature_per_triangle = \
@@ -126,7 +156,6 @@ class CurvatureBasedSeg:
                 height = abs(np.inner(self._orienter.occlusal, face_center - self._mesh.vertices[peak_idx]))
                 if width1 > self._MAX_SPREAD_WIDTH or width2 > self._MAX_SPREAD_WIDTH or height > self._MAX_SPREAD_HEIGHT:
                     # this peak beyond the max spreading range, discard it
-                    # self._discarded_spilled_peaks.append(peak_idx)
                     self.discarded_peaks['Spilled Peaks'].add(peak_idx)
                     return
                     # continue
@@ -138,59 +167,59 @@ class CurvatureBasedSeg:
                         accumulative_cost[face_] = accumulative_cost[face] + edges_cost_adj[i]
                         que.put((accumulative_cost[face_], face_))
 
-        self.peak_costs [peak_idx] = accumulative_cost
+        self.peak_costs[peak_idx] = accumulative_cost
         self.peak_masks[peak_idx] = is_shortest
 
-    def _remove_peaks_on_rugae(self):
-        """
-        Any tooth should have both a lingual and a buccal side, or for very
-        slanted teeth, at least a significant variance. The groups on the rugae
-        will all face only palatally so will be rejected by this rule.
-        """
-        # 1. fit a quadratic curve to all spread regions
-        all_region_mask = np.zeros_like(self.peak_masks[self.valid_peaks[0]], dtype=bool)
-
-        for p in self.valid_peaks:
-            all_region_mask |= self.peak_masks[p]
-        triangle_centers = self._mesh.triangles_center[all_region_mask]
-        x, y = (np.dot((triangle_centers - self._orienter.center), e)
-                for e in (self._orienter.right, self._orienter.forward))
-
-        # prioritise the more occlusal points
-        weights = np.dot(triangle_centers, self._orienter.occlusal)
-        weights -= np.min(weights)
-        weights = weights ** 5
-
-        poly = np.polynomial.Polynomial.fit(x, y, 2, w=weights)
-        deriv = poly.deriv()
-
-        # 2. check each group's region
-        groups_to_remove = []
-        for group, mask in self._group_region_masks.items():
-            center = self._mesh.triangles_center[mask].mean(axis=0)
-            deriv_at_peak = deriv((center - self._orienter.center) @ self._orienter.right)
-            # tangent in right–forward plane
-            tangent = geom.normalize_vector(
-                deriv_at_peak * self._orienter.forward + self._orienter.right
-            )
-            # normal (approx lingual) direction
-            approx_lingual_dir = geom.normalize_vector(np.cross(tangent, self._orienter.occlusal))
-            region_faces = np.where(mask)[0]
-            region_normals = self._mesh.face_normals[region_faces]
-            dot = np.dot(region_normals, approx_lingual_dir)
-            num_buccal_face = dot[dot < -0.7].shape[0]
-            num_lingual_face = dot[dot > 0.7].shape[0]
-            buccal_ratio = num_buccal_face / region_faces.shape[0]
-            lingual_ratio = num_lingual_face / region_faces.shape[0]
-            if buccal_ratio < 0.05 or (1 - lingual_ratio - buccal_ratio) > 0.9:
-                self.discarded_overlap_groups[group] = mask
-                groups_to_remove.append(group)
-        for group in groups_to_remove:
-            self._group_region_masks.pop(group)
-
-        # flatten peaks
-        peaks_to_remove = set().union(*groups_to_remove)
-        self.discarded_peaks['Rugae Peaks'] = peaks_to_remove
+    # def _remove_peaks_on_rugae(self):
+    #     """
+    #     Any tooth should have both a lingual and a buccal side, or for very
+    #     slanted teeth, at least a significant variance. The groups on the rugae
+    #     will all face only palatally so will be rejected by this rule.
+    #     """
+    #     # 1. fit a quadratic curve to all spread regions
+    #     all_region_mask = np.zeros_like(self.peak_masks[self.valid_peaks[0]], dtype=bool)
+    #
+    #     for p in self.valid_peaks:
+    #         all_region_mask |= self.peak_masks[p]
+    #     triangle_centers = self._mesh.triangles_center[all_region_mask]
+    #     x, y = (np.dot((triangle_centers - self._orienter.center), e)
+    #             for e in (self._orienter.right, self._orienter.forward))
+    #
+    #     # prioritise the more occlusal points
+    #     weights = np.dot(triangle_centers, self._orienter.occlusal)
+    #     weights -= np.min(weights)
+    #     weights = weights ** 5
+    #
+    #     poly = np.polynomial.Polynomial.fit(x, y, 2, w=weights)
+    #     deriv = poly.deriv()
+    #
+    #     # 2. check each group's region
+    #     groups_to_remove = []
+    #     for group, mask in self._group_region_masks.items():
+    #         center = self._mesh.triangles_center[mask].mean(axis=0)
+    #         deriv_at_peak = deriv((center - self._orienter.center) @ self._orienter.right)
+    #         # tangent in right–forward plane
+    #         tangent = geom.normalize_vector(
+    #             deriv_at_peak * self._orienter.forward + self._orienter.right
+    #         )
+    #         # normal (approx lingual) direction
+    #         approx_lingual_dir = geom.normalize_vector(np.cross(tangent, self._orienter.occlusal))
+    #         region_faces = np.where(mask)[0]
+    #         region_normals = self._mesh.face_normals[region_faces]
+    #         dot = np.dot(region_normals, approx_lingual_dir)
+    #         num_buccal_face = dot[dot < -0.7].shape[0]
+    #         num_lingual_face = dot[dot > 0.7].shape[0]
+    #         buccal_ratio = num_buccal_face / region_faces.shape[0]
+    #         lingual_ratio = num_lingual_face / region_faces.shape[0]
+    #         if buccal_ratio < 0.05 or (1 - lingual_ratio - buccal_ratio) > 0.9:
+    #             self.discarded_overlap_groups[group] = mask
+    #             groups_to_remove.append(group)
+    #     for group in groups_to_remove:
+    #         self._group_region_masks.pop(group)
+    #
+    #     # flatten peaks
+    #     peaks_to_remove = set().union(*groups_to_remove)
+    #     self.discarded_peaks['Rugae Peaks'] = peaks_to_remove
 
     def _build_overlapping_area_groups(self):
         """
@@ -222,19 +251,23 @@ class CurvatureBasedSeg:
             if flag[i]:
                 continue
             connected = np.where(overlap_adjacency_matrix[i] == 1)[0]
-            flag[connected] = True
-
             group_peak_args = np.unique(np.where(overlap_adjacency_matrix[connected] == 1)[1])
-            group_peaks = frozenset(filtered_peaks[group_peak_args])
+            flag[group_peak_args] = True
+            group_peaks = set(filtered_peaks[group_peak_args])
             mask = mask_or(*(self.peak_masks[i] for i in group_peaks))
-            self._group_region_masks[group_peaks] = mask
+            self.overlapping_area_args.append(group_peaks)
             area_group = OverlappingAreaGroup(group_peaks, mask, self._mesh, self._orienter, self.quadratic)
 
             if area_group.width > self.MAX_TOOTH_WIDTH:
                 # Occasionally you get very long stretches of gum just beneath
                 # the incisors.
                 self.discarded_overlap_groups["Too Wide"].append(area_group)
-                self.overlapping_area_groups.append(area_group)
+                # self.overlapping_area_groups.append(area_group)
+            elif area_group.is_one_axis_dominate:
+                # To be a tooth the area should have significant extent
+                # in at least two axes.
+                self.discarded_overlap_groups["One Axis Dominate"].append(area_group)
+                # self.overlapping_area_groups.append(area_group)
             elif area_group.is_one_sided:
                 # To be a cusp of a tooth the area should have both lingual
                 # facing and buccal facing parts.
@@ -262,6 +295,69 @@ class CurvatureBasedSeg:
         typically happens if there are raised areas in the centre-rear of the
         model. Other than manually removing these areas, there is nothing that
         can be done to fix this."""
+
+    def _group_inline_area_groups(self):
+        """Next group overlapping_area_groups if they are inline to join the lingual and buccal
+        cusps of molars/premolars. This is done by projecting the points in each area quadratic
+        to get a 1D line of points. The range of each area's points is found and compared with
+        the ranges from other areas to determine if they are inline. """
+
+        # Overlap in this method refers to the ranges of the projections overlapping rather than
+        # areas overlapping as it was before. Apart from `self.overlapping_area_groups`.
+
+        # This method considers both the absolute width of a range overlap (mm) and the ratio of
+        # overlap_width / min(width of each range).
+
+        n = len(self.overlapping_area_groups)
+        assert n > 0
+
+        overlap_width_map = np.zeros((n, n))
+        overlap_ratio_map = np.zeros((n, n))
+
+        # Cycle through all possible pairs, recording the width and ratios in
+        # the above square arrays.
+        for i in range(n):
+            area_group_i = self.overlapping_area_groups[i]
+            for j in range(i + 1, n):
+                area_group_j = self.overlapping_area_groups[j]
+
+                # Skip if they are more than a tooth's width apart.
+                # This is approximated lazily by looking at the last and first peak of each group
+                peak_point1 = self._mesh.vertices[max(area_group_i.peaks)]
+                peak_point2 = self._mesh.vertices[min(area_group_j.peaks)]
+                if (geom.magnitude(peak_point1 - peak_point2) >
+                        self.MAX_TOOTH_WIDTH):
+                    continue
+
+                # The actual maths is handled in `OverlappingAreasGroup.get_inline_overlap`
+                overlap = area_group_i.get_inline_overlap(area_group_j)
+                overlap_width_map[i, j] = overlap.width
+                overlap_ratio_map[i, j] = overlap.ratio
+
+        # Magic made up rule that combines all the above into a hard "inline or not inline" square
+        # bool array.
+        mask = ((12 > overlap_width_map) & (overlap_width_map > 2) & (overlap_ratio_map > 0.55))
+
+        # Again convert bool array to arg groups
+        self.inline_group_args = Grouping(mask).groups
+
+    def _build_teeth(self):
+        """Convert each group from `self.inline_group_args` to a Tooth instance from tooth_class.py.
+        Also filters away instances that cover too little area to be a tooth. Otherwise you get tiny
+        little isolated bumps which are irrelevant. """
+
+        self.teeth = []
+        for (i, args) in enumerate(self.inline_group_args):
+            # Each tooth receives all the OverlappingAreaGroup objects from an inline group. We
+            # don't know which tooth is which yet so each is given an enumeration as a convenient ID.
+            groups = [self.overlapping_area_groups[j] for j in sorted(args)]
+            tooth = Tooth(groups, i)
+            print(tooth.area)
+            if tooth.area < self.MIN_TOOTH_AREA:
+                self.discarded_teeth["Area too small"].append(tooth)
+                continue
+
+            self.teeth.append(tooth)
 
 
 

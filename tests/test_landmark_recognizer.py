@@ -5,7 +5,8 @@ import matplotlib.pyplot as plt
 from pyvista import plotting
 
 from AlveoLab.landmark_recognizer import LandmarkRecognizer
-from AlveoLab.pyvista_utils import get_dental_plotter
+from AlveoLab.pyvista_utils import get_dental_plotter, draw_obb
+from AlveoLab.utils import mask_or
 
 def plot_quadratic(lr: LandmarkRecognizer):
     uv = np.c_[lr._mesh.vertices @ lr._orienter.right,
@@ -19,6 +20,12 @@ def plot_quadratic(lr: LandmarkRecognizer):
     plt.scatter(uv[:, 0], uv[:, 1], s=2, alpha=0.25, label="all vertices")
     plt.plot(x, y, color='red')
     plt.show()
+
+
+def plot_all_obbs(plotter, lr):
+    for group in lr._seg.overlapping_area_groups:
+        draw_obb(plotter, group.obb, color=(1, 0.5, 0))
+
 
 def plot_horizontal_hull(lr : LandmarkRecognizer):
     uv = np.c_[lr._mesh.vertices @ lr._orienter.right,
@@ -41,10 +48,10 @@ def plot_horizontal_hull(lr : LandmarkRecognizer):
     plt.tight_layout()
     plt.show()
 
+
 def get_spread_regions_color(lr : LandmarkRecognizer):
     # assign random colors to each peak region
     num_peaks = len(lr._peak_indices)
-    num_groups = len(lr._group_region_mask)
 
     peak_colors = np.random.rand(num_peaks, 3)
 
@@ -53,8 +60,8 @@ def get_spread_regions_color(lr : LandmarkRecognizer):
     # for i, (key, val) in enumerate(lr._group_region_mask.items()):
     #     mask = lr._group_region_mask[key]
     #     face_colors[mask] = peak_colors[i]
-    for i, group in enumerate(lr._seg.overlapping_area_groups):
-        mask = group.mask
+    for i, tooth in enumerate(lr._seg.teeth):
+        mask = tooth.mask
         face_colors[mask] = peak_colors[i]
 
     # for i, (key, val) in enumerate(lr._seg.peak_region_mask.items()):
@@ -66,10 +73,12 @@ def get_spread_regions_color(lr : LandmarkRecognizer):
 
 if __name__ == '__main__':
     #mesh: tm.Trimesh = tm.load_mesh('../data/1JMandibular_export.stl')
-    mesh: tm.Trimesh = tm.load_mesh('../data/models10y/0611_10yr_Maxillary_export.stl')
+    mesh: tm.Trimesh = tm.load_mesh('../data/models10y/0610_10yr_Maxillary_export.stl')
 
     landmark_recognizer = LandmarkRecognizer(mesh, 'U')
-
+    # heights = np.inner(mesh.triangles_center, landmark_recognizer._orienter.occlusal)
+    # mesh = mesh.submesh([heights > landmark_recognizer.height_threshold], append=True)
+    mesh = landmark_recognizer._mesh
     # plotting
     # -------------------------
     plotter = get_dental_plotter()
@@ -79,9 +88,9 @@ if __name__ == '__main__':
     faces_pv = np.hstack([np.full((mesh.faces.shape[0], 1), 3), mesh.faces]).flatten()
     pv_mesh = pv.PolyData(mesh.vertices, faces_pv)
 
-    mesh_color = [1.0, 1.0, 1.0]
-    #colors = np.tile(mesh_color, (mesh.faces.shape[0], 1))
-    #pv_mesh.cell_data["colors"] = colors
+    # mesh_color = [1.0, 1.0, 1.0]
+    # colors = np.tile(mesh_color, (mesh.faces.shape[0], 1))
+    # pv_mesh.cell_data["colors"] = colors
     face_colors, peak_colors = get_spread_regions_color(landmark_recognizer)
     pv_mesh.cell_data["colors"] = face_colors
     plotter.add_mesh(pv_mesh, scalars="colors", rgb=True, opacity=1.0, specular=0.4, specular_power=10, ambient=0.2)
@@ -89,8 +98,11 @@ if __name__ == '__main__':
     # add peaks
     points = mesh.vertices[landmark_recognizer._peak_indices]
     plotter.add_points(points, scalars=peak_colors, rgb=True, point_size=20, render_points_as_spheres=True)
+
+    # plot_all_obbs(plotter, landmark_recognizer)
+
     plotter.show()
 
     #plot_horizontal_hull(landmark_recognizer)
     #plot_spread_regions(landmark_recognizer)
-    plot_quadratic(landmark_recognizer)
+    #plot_quadratic(landmark_recognizer)

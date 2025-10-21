@@ -3,6 +3,7 @@ import numpy as np
 from trimesh import Trimesh
 import AlveoLab.math.geometry as geom
 
+
 class BaseOrienter(ABC):
     """
     Abstract base class for orientation of trimesh dental models.
@@ -31,7 +32,7 @@ class BaseOrienter(ABC):
 
     """
 
-    def __init__(self, mesh, arch_type = None):
+    def __init__(self, mesh, arch_type=None):
         self.mesh = mesh
         self.arch_type = arch_type
 
@@ -120,4 +121,3 @@ class BaseOrienter(ABC):
         if occlusal is not None:
             out += self.occlusal * np.array(occlusal)[..., np.newaxis]
         return out
-

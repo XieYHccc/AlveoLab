@@ -6,7 +6,7 @@ import trimesh as tm
 from scipy.spatial import ConvexHull, QhullError
 
 from AlveoLab.utils import get_logger, logging, LazyAttribute
-from AlveoLab.orienter.pca_orienter import PcaOrienter
+from AlveoLab.orienter.pca_dental_orienter import PcaOrienter
 from AlveoLab.trimesh_utils import get_local_maximum_along_dir
 from AlveoLab.segmentation.curvature_based_seg import CurvatureBasedSeg
 
@@ -47,8 +47,8 @@ def _min_dist_points_to_segments(points, edges):
 
 
 class LandmarkRecognizer:
-    _HEIGHT_DIFF_THRESHOLD = 7.0  # mm, height difference from the highest point to height threshold
-    _NEAR_BOUNDARY_DIST_THRESHOLD = 1.3  # mm, for filtering peaks near boundary
+    _HEIGHT_DIFF_THRESHOLD = 9.0  # mm, height difference from the highest point to height threshold
+    _NEAR_BOUNDARY_DIST_THRESHOLD = 0.3  # mm, for filtering peaks near boundary
     _REMOVE_GUM_PEAKS_RATIO = 1.5  # vertical/horizontal ratio threshold for removing gum peaks
 
     def __init__(self, mesh, arch_type):
@@ -92,6 +92,7 @@ class LandmarkRecognizer:
         logger.info("[pipeline] LandmarkRecognizer run started")
 
         self._run_step(self._find_orientation, "find_orientation")
+        self._run_step(self._preprocess_mesh, "preprocess_mesh")
         self._run_step(self._find_peaks, "find_peaks")
         self._run_step(self._remove_peaks_near_boundary, "remove_peaks_near_boundary")
         self._run_step(self._remove_peaks_on_gingiva, "remove_peaks_on_gingiva")
@@ -102,6 +103,16 @@ class LandmarkRecognizer:
 
     def _find_orientation(self):
         self._orienter = PcaOrienter(self._mesh, self._arch_type)
+
+    def _preprocess_mesh(self):
+        faces_height = np.inner(self._mesh.triangles_center, self._orienter.occlusal)
+        submeshes = self._mesh.submesh([faces_height > self.height_threshold], append=True).split(only_watertight=False)
+
+        filtered = [m for m in submeshes if m.area > 20 and len(m.faces) > 100]
+        assert len(filtered) > 0
+
+        merged = tm.util.concatenate(filtered)
+        self._mesh = merged
 
     def _find_peaks(self):
         # 1. get local maxima along occlusal direction
@@ -157,13 +168,13 @@ class LandmarkRecognizer:
                 if dx > 5.0 or dy > 5.0:
                     continue  # judge within a range
 
-                horizontal_dist = np.sqrt(dx * dx + dy * dy)
-                if horizontal_dist < 1e-6:
-                    continue
+                # horizontal_dist = np.sqrt(dx * dx + dy * dy)
+                # if horizontal_dist < 1e-6:
+                #     continue
                 vertical_dist = abs(vertical_coords[p1] - vertical_coords[p2])
                 if vertical_dist < 2.0:
                     continue  # ignore small vertical difference
-                if vertical_dist / dx > self._REMOVE_GUM_PEAKS_RATIO or vertical_dist / dy > self._REMOVE_GUM_PEAKS_RATIO:
+                if vertical_dist / dx > self._REMOVE_GUM_PEAKS_RATIO:
                     # lower peak is gum peak
                     lower_peak = p1 if vertical_coords[p1] < vertical_coords[p2] else p2
                     gingiva_peaks.add(lower_peak)
@@ -178,7 +189,7 @@ class LandmarkRecognizer:
 
         # update peak indices after segmentation, spilled peaks are removed
         self._peak_indices = self._seg.valid_peaks
-        self._group_region_mask = self._seg._group_region_masks
+        # self._group_region_mask = self._seg._group_region_masks
 
     def _label_teeth(self):
         pass
