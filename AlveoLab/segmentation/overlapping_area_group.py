@@ -104,7 +104,7 @@ class OverlappingAreaGroup:
     @LazyAttribute
     def is_one_axis_dominate(self):
         ratios = self.obb.extents / np.max(self.obb.extents)
-        dominate_count = np.sum(ratios < 0.5)
+        dominate_count = np.sum(ratios < 0.3)
         return dominate_count >= 2
 
     @LazyAttribute

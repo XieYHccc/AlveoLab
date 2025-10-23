@@ -49,7 +49,7 @@ def _min_dist_points_to_segments(points, edges):
 class LandmarkRecognizer:
     _HEIGHT_DIFF_THRESHOLD = 9.0  # mm, height difference from the highest point to height threshold
     _NEAR_BOUNDARY_DIST_THRESHOLD = 0.3  # mm, for filtering peaks near boundary
-    _REMOVE_GUM_PEAKS_RATIO = 1.5  # vertical/horizontal ratio threshold for removing gum peaks
+    _REMOVE_GUM_PEAKS_RATIO = 2  # vertical/horizontal ratio threshold for removing gum peaks
 
     def __init__(self, mesh, arch_type):
         self._mesh = mesh
@@ -95,7 +95,7 @@ class LandmarkRecognizer:
         self._run_step(self._preprocess_mesh, "preprocess_mesh")
         self._run_step(self._find_peaks, "find_peaks")
         self._run_step(self._remove_peaks_near_boundary, "remove_peaks_near_boundary")
-        self._run_step(self._remove_peaks_on_gingiva, "remove_peaks_on_gingiva")
+        self._run_step(self._remove_peaks_on_gingiva, "remove_peaks_on_gingiva")  #TODO: acutually not works well
         self._run_step(self._segment_teeth, "segment_teeth")
 
         total_elapsed = time.perf_counter() - total_start
@@ -106,7 +106,7 @@ class LandmarkRecognizer:
 
     def _preprocess_mesh(self):
         faces_height = np.inner(self._mesh.triangles_center, self._orienter.occlusal)
-        submeshes = self._mesh.submesh([faces_height > self.height_threshold], append=True).split(only_watertight=False)
+        submeshes = self._mesh.submesh([faces_height > (self.height_threshold - 0)], append=True).split(only_watertight=False)
 
         filtered = [m for m in submeshes if m.area > 20 and len(m.faces) > 100]
         assert len(filtered) > 0
@@ -167,6 +167,8 @@ class LandmarkRecognizer:
                 dy = abs(forward_coords[p1] - forward_coords[p2])
                 if dx > 5.0 or dy > 5.0:
                     continue  # judge within a range
+                if dy / dx > 2:
+                    continue  # looks like peaks on different teeth(ugly!)
 
                 # horizontal_dist = np.sqrt(dx * dx + dy * dy)
                 # if horizontal_dist < 1e-6:
@@ -176,6 +178,7 @@ class LandmarkRecognizer:
                     continue  # ignore small vertical difference
                 if vertical_dist / dx > self._REMOVE_GUM_PEAKS_RATIO:
                     # lower peak is gum peak
+                    print(dx, dy, vertical_dist, vertical_dist / dx)
                     lower_peak = p1 if vertical_coords[p1] < vertical_coords[p2] else p2
                     gingiva_peaks.add(lower_peak)
 

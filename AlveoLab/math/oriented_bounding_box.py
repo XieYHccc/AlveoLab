@@ -11,7 +11,7 @@ class Obb:
     @LazyAttribute
     def center(self):
         to_origin_offset = self.to_origin_matrix[:3, 3]
-        return -to_origin_offset
+        return self.to_origin_matrix[:3, :3].T @ -to_origin_offset
 
     @LazyAttribute
     def max_width(self):

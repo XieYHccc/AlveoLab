@@ -57,15 +57,15 @@ def get_spread_regions_color(lr : LandmarkRecognizer):
 
     # assign colors to each face based on the peak region it belongs to
     face_colors = np.ones((lr._mesh.faces.shape[0], 3))
-    # for i, (key, val) in enumerate(lr._group_region_mask.items()):
-    #     mask = lr._group_region_mask[key]
+    # for i, group in enumerate(lr._seg.overlapping_area_groups):
+    #     mask = group.mask
     #     face_colors[mask] = peak_colors[i]
     for i, tooth in enumerate(lr._seg.teeth):
         mask = tooth.mask
         face_colors[mask] = peak_colors[i]
 
-    # for i, (key, val) in enumerate(lr._seg.peak_region_mask.items()):
-    #     mask = lr._seg.peak_region_mask[key]
+    # peak_colors = np.random.rand(len(lr._seg.peak_masks), 3)
+    # for i, (p, mask) in enumerate(lr._seg.peak_masks.items()):
     #     face_colors[mask] = peak_colors[i]
 
 
@@ -73,7 +73,7 @@ def get_spread_regions_color(lr : LandmarkRecognizer):
 
 if __name__ == '__main__':
     #mesh: tm.Trimesh = tm.load_mesh('../data/1JMandibular_export.stl')
-    mesh: tm.Trimesh = tm.load_mesh('../data/models10y/0610_10yr_Maxillary_export.stl')
+    mesh: tm.Trimesh = tm.load_mesh('../data/models10y/616_10Yr_Maxillary_export.stl')
 
     landmark_recognizer = LandmarkRecognizer(mesh, 'U')
     # heights = np.inner(mesh.triangles_center, landmark_recognizer._orienter.occlusal)
@@ -96,6 +96,10 @@ if __name__ == '__main__':
     plotter.add_mesh(pv_mesh, scalars="colors", rgb=True, opacity=1.0, specular=0.4, specular_power=10, ambient=0.2)
 
     # add peaks
+    # discarded_peaks = np.array(list(landmark_recognizer._seg.discarded_peaks['Spilled Peaks']))
+    # discarded_peaks = np.array(list(landmark_recognizer._seg.discarded_overlap_groups["Only on One Side"].peaks))
+    # points = mesh.vertices[discarded_peaks]
+    # plotter.add_points(points, point_size=20, render_points_as_spheres=True)
     points = mesh.vertices[landmark_recognizer._peak_indices]
     plotter.add_points(points, scalars=peak_colors, rgb=True, point_size=20, render_points_as_spheres=True)
 

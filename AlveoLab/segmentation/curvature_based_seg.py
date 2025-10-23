@@ -3,6 +3,7 @@ import queue
 import collections
 
 import AlveoLab.math.geometry as geom
+from AlveoLab.math.geometry import inner_product
 from AlveoLab.utils import LazyAttribute, mask_or
 from AlveoLab.trimesh_utils import get_edge_based_curvature, get_face_face_adjacency
 from AlveoLab.orienter.pca_dental_orienter import PcaOrienter
@@ -325,8 +326,11 @@ class CurvatureBasedSeg:
                 # This is approximated lazily by looking at the last and first peak of each group
                 peak_point1 = self._mesh.vertices[max(area_group_i.peaks)]
                 peak_point2 = self._mesh.vertices[min(area_group_j.peaks)]
-                if (geom.magnitude(peak_point1 - peak_point2) >
-                        self.MAX_TOOTH_WIDTH):
+                if geom.magnitude(peak_point1 - peak_point2) > self.MAX_TOOTH_WIDTH:
+                    continue
+
+                # Skip if they are too far apart in the occlusal direction.
+                if abs(inner_product(area_group_i.obb.center - area_group_j.obb.center, self._orienter.occlusal)) > 3:
                     continue
 
                 # The actual maths is handled in `OverlappingAreasGroup.get_inline_overlap`
@@ -352,7 +356,6 @@ class CurvatureBasedSeg:
             # don't know which tooth is which yet so each is given an enumeration as a convenient ID.
             groups = [self.overlapping_area_groups[j] for j in sorted(args)]
             tooth = Tooth(groups, i)
-            print(tooth.area)
             if tooth.area < self.MIN_TOOTH_AREA:
                 self.discarded_teeth["Area too small"].append(tooth)
                 continue
