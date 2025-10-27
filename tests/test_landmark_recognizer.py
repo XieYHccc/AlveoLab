@@ -56,7 +56,7 @@ def get_spread_regions_color(lr : LandmarkRecognizer):
     peak_colors = np.random.rand(num_peaks, 3)
 
     # assign colors to each face based on the peak region it belongs to
-    face_colors = np.ones((lr._mesh.faces.shape[0], 3))
+    face_colors = np.ones((lr.mesh.faces.shape[0], 3))
     # for i, group in enumerate(lr._seg.overlapping_area_groups):
     #     mask = group.mask
     #     face_colors[mask] = peak_colors[i]
@@ -68,19 +68,16 @@ def get_spread_regions_color(lr : LandmarkRecognizer):
     # for i, (p, mask) in enumerate(lr._seg.peak_masks.items()):
     #     face_colors[mask] = peak_colors[i]
 
-
     return face_colors, peak_colors
+
 
 if __name__ == '__main__':
     #mesh: tm.Trimesh = tm.load_mesh('../data/1JMandibular_export.stl')
-    mesh: tm.Trimesh = tm.load_mesh('../data/models10y/0646_10yr_Mandibular_export.stl')
+    mesh: tm.Trimesh = tm.load_mesh('../data/models10y/0674_10 YR_Mandibular_export.stl')
 
     landmark_recognizer = LandmarkRecognizer(mesh, 'L')
-    hf = landmark_recognizer.harmonic_filed
+    mesh = landmark_recognizer.mesh
 
-    # heights = np.inner(mesh.triangles_center, landmark_recognizer._orienter.occlusal)
-    # mesh = mesh.submesh([heights > landmark_recognizer.height_threshold], append=True)
-    mesh = landmark_recognizer._mesh
     # plotting
     # -------------------------
     plotter = get_dental_plotter()
@@ -96,11 +93,11 @@ if __name__ == '__main__':
     face_colors, peak_colors = get_spread_regions_color(landmark_recognizer)
     pv_mesh.cell_data["colors"] = face_colors
     # lower, upper = np.percentile(curv, [5, 95])
-    lower, upper = np.percentile(hf, [5, 95])
-    # 将离群值clamp到这个范围
-    hf_clamped = np.clip(hf, lower, upper)
-    pv_mesh.point_data["harmonic_filed"] = hf
-
+    # hf = landmark_recognizer.harmonic_filed
+    # lower, upper = np.percentile(hf, [5, 95])
+    # # 将离群值clamp到这个范围
+    # hf_clamped = np.clip(hf, lower, upper)
+    # pv_mesh.point_data["harmonic_filed"] = hf
     #plotter.add_mesh(pv_mesh, scalars="harmonic_filed", opacity=1.0, specular=0.4, specular_power=10, ambient=0.2)
 
     plotter.add_mesh(pv_mesh, scalars="colors", rgb=True, opacity=1.0, specular=0.4, specular_power=10, ambient=0.2)

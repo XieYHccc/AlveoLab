@@ -10,6 +10,7 @@ import scipy.sparse as sp
 from AlveoLab.math.oriented_bounding_box import Obb
 from AlveoLab.math.geometry import cotangent
 
+
 def get_face_face_adjacency(mesh: Trimesh):
     """
     get each face's three adjacent faces
@@ -76,6 +77,7 @@ def get_local_maximum_along_dir(mesh, direction) -> np.ndarray:
     heights = np.dot(mesh.vertices, direction)
     return get_local_maximum(mesh, heights)
 
+
 def get_local_maximum(mesh, scalar_filed):
     # init one to all vertex
     mask = np.ones(len(mesh.vertices), dtype=bool)
@@ -90,6 +92,7 @@ def get_local_maximum(mesh, scalar_filed):
     mask[non_max_idx] = 0
     indices = np.nonzero(mask)[0]
     return indices
+
 
 def get_oriented_bounding_box(mesh):
     to_origin, extents = oriented_bounds(mesh)
@@ -120,7 +123,7 @@ def discrete_mean_curvature_measure(mesh):
     fa = mesh.face_adjacency
     fae = mesh.face_adjacency_edges
     edge_measure = {f"{fae[i][0]},{fae[i][1]}": (mesh.vertices[fae[i][1]] - mesh.vertices[fae[i][0]]) * (
-                cotangents[f"{v[0]},{fa[i][0]}"] + cotangents[f"{v[1]},{fa[i][1]}"]) for i, v in
+            cotangents[f"{v[0]},{fa[i][0]}"] + cotangents[f"{v[1]},{fa[i][1]}"]) for i, v in
                     enumerate(mesh.face_adjacency_unshared)}
 
     # calculate mean curvature using one-ring
@@ -143,8 +146,8 @@ def discrete_mean_curvature_measure(mesh):
         # mean_curv[vertex_id] = 0.5 * np.linalg.norm(delta_s) * sign
         mean_curv[vertex_id] = -0.5 * np.dot(n, delta_s)
 
-
     return np.array(mean_curv)
+
 
 def smooth_curvature(mesh, curvature, iterations=3):
     """Simple neighborhood averaging of vertex curvature."""
@@ -183,7 +186,7 @@ def get_cotangent_weights_laplacian_matrix(mesh):
 
         # 计算三个角的 cot 值
         cot_alpha = cotangent(vj, vi, vk)
-        cot_beta  = cotangent(vi, vj, vk)
+        cot_beta = cotangent(vi, vj, vk)
         cot_gamma = cotangent(vi, vk, vj)
 
         # 累积权重 (对称)
@@ -220,13 +223,22 @@ def build_Ab_from_L_and_constraints(L, n, fs_idx, bs_idx, us_idx, w=1000.0):
     # FS rows
     r = 0
     for i in fs_idx:
-        rows.append(r); cols.append(i); data.append(w); r += 1
+        rows.append(r);
+        cols.append(i);
+        data.append(w);
+        r += 1
     # BS rows
     for i in bs_idx:
-        rows.append(r); cols.append(i); data.append(w); r += 1
+        rows.append(r);
+        cols.append(i);
+        data.append(w);
+        r += 1
     # US rows
     for i in us_idx:
-        rows.append(r); cols.append(i); data.append(w); r += 1
+        rows.append(r);
+        cols.append(i);
+        data.append(w);
+        r += 1
 
     C = sp.coo_matrix((data, (rows, cols)), shape=(m, n)).tocsr()
 
@@ -236,7 +248,7 @@ def build_Ab_from_L_and_constraints(L, n, fs_idx, bs_idx, us_idx, w=1000.0):
     if len(fs_idx) > 0:
         b0[:len(fs_idx)] = w * 1.0
     if len(us_idx) > 0:
-        b0[len(fs_idx)+len(bs_idx):] = w * 0.5
+        b0[len(fs_idx) + len(bs_idx):] = w * 0.5
 
     # A = [L; C], b = [0; b0]
     A = sp.vstack([L.tocsr(), C], format='csr')
