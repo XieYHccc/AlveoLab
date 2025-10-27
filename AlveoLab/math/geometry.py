@@ -106,3 +106,13 @@ def get_components(points, *unit_vectors):
 
 def get_components_zipped(points, *unit_vectors):
     return points @ np.array(unit_vectors).T
+
+def cotangent(a, b, c):
+    """
+    Compute cotangent of the angle at vertex a in triangle (a,b,c)
+    """
+    ba = normalize_vector(b - a)
+    ca = normalize_vector(c - a)
+    cos_angle = np.dot(ba, ca)
+    sin_angle = magnitude(np.cross(ba, ca))
+    return cos_angle / sin_angle

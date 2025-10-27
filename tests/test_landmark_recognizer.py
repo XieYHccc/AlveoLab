@@ -14,7 +14,7 @@ def plot_quadratic(lr: LandmarkRecognizer):
 
     # draw the curve
     x = np.linspace(np.min(mesh.triangles_center[:, 0]), np.max(mesh.triangles_center[:, 0]), 100)
-    y = lr._seg.quadratic.quadratic_2d(x)
+    y = lr.seg.quadratic.quadratic_2d(x)
 
     plt.figure(figsize=(6, 6))
     plt.scatter(uv[:, 0], uv[:, 1], s=2, alpha=0.25, label="all vertices")
@@ -23,7 +23,7 @@ def plot_quadratic(lr: LandmarkRecognizer):
 
 
 def plot_all_obbs(plotter, lr):
-    for group in lr._seg.overlapping_area_groups:
+    for group in lr.seg.overlapping_area_groups:
         draw_obb(plotter, group.obb, color=(1, 0.5, 0))
 
 
@@ -51,7 +51,7 @@ def plot_horizontal_hull(lr : LandmarkRecognizer):
 
 def get_spread_regions_color(lr : LandmarkRecognizer):
     # assign random colors to each peak region
-    num_peaks = len(lr._peak_indices)
+    num_peaks = len(lr.peak_indices)
 
     peak_colors = np.random.rand(num_peaks, 3)
 
@@ -60,7 +60,7 @@ def get_spread_regions_color(lr : LandmarkRecognizer):
     # for i, group in enumerate(lr._seg.overlapping_area_groups):
     #     mask = group.mask
     #     face_colors[mask] = peak_colors[i]
-    for i, tooth in enumerate(lr._seg.teeth):
+    for i, tooth in enumerate(lr.seg.teeth):
         mask = tooth.mask
         face_colors[mask] = peak_colors[i]
 
@@ -73,9 +73,11 @@ def get_spread_regions_color(lr : LandmarkRecognizer):
 
 if __name__ == '__main__':
     #mesh: tm.Trimesh = tm.load_mesh('../data/1JMandibular_export.stl')
-    mesh: tm.Trimesh = tm.load_mesh('../data/models10y/616_10Yr_Maxillary_export.stl')
+    mesh: tm.Trimesh = tm.load_mesh('../data/models10y/0646_10yr_Mandibular_export.stl')
 
-    landmark_recognizer = LandmarkRecognizer(mesh, 'U')
+    landmark_recognizer = LandmarkRecognizer(mesh, 'L')
+    hf = landmark_recognizer.harmonic_filed
+
     # heights = np.inner(mesh.triangles_center, landmark_recognizer._orienter.occlusal)
     # mesh = mesh.submesh([heights > landmark_recognizer.height_threshold], append=True)
     mesh = landmark_recognizer._mesh
@@ -93,6 +95,14 @@ if __name__ == '__main__':
     # pv_mesh.cell_data["colors"] = colors
     face_colors, peak_colors = get_spread_regions_color(landmark_recognizer)
     pv_mesh.cell_data["colors"] = face_colors
+    # lower, upper = np.percentile(curv, [5, 95])
+    lower, upper = np.percentile(hf, [5, 95])
+    # 将离群值clamp到这个范围
+    hf_clamped = np.clip(hf, lower, upper)
+    pv_mesh.point_data["harmonic_filed"] = hf
+
+    #plotter.add_mesh(pv_mesh, scalars="harmonic_filed", opacity=1.0, specular=0.4, specular_power=10, ambient=0.2)
+
     plotter.add_mesh(pv_mesh, scalars="colors", rgb=True, opacity=1.0, specular=0.4, specular_power=10, ambient=0.2)
 
     # add peaks
@@ -100,7 +110,7 @@ if __name__ == '__main__':
     # discarded_peaks = np.array(list(landmark_recognizer._seg.discarded_overlap_groups["Only on One Side"].peaks))
     # points = mesh.vertices[discarded_peaks]
     # plotter.add_points(points, point_size=20, render_points_as_spheres=True)
-    points = mesh.vertices[landmark_recognizer._peak_indices]
+    points = mesh.vertices[landmark_recognizer.peak_indices]
     plotter.add_points(points, scalars=peak_colors, rgb=True, point_size=20, render_points_as_spheres=True)
 
     # plot_all_obbs(plotter, landmark_recognizer)
