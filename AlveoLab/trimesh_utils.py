@@ -178,28 +178,82 @@ def get_cotangent_weights_laplacian_matrix(mesh):
     vertices = mesh.vertices
     faces = mesh.faces
     n = len(vertices)
-    I, J, W = [], [], []
 
+    I, J, W = [], [], []
     for tri in faces:
         i, j, k = tri
         vi, vj, vk = vertices[i], vertices[j], vertices[k]
 
-        # 计算三个角的 cot 值
-        cot_alpha = cotangent(vj, vi, vk)
-        cot_beta = cotangent(vi, vj, vk)
-        cot_gamma = cotangent(vi, vk, vj)
+        cot_alpha = cotangent(vi, vj, vk)  # angle at i
+        cot_beta = cotangent(vj, vk, vi)  # angle at j
+        cot_gamma = cotangent(vk, vi, vj)  # angle at k
 
-        # 累积权重 (对称)
-        for (p, q, w) in [(i, j, cot_gamma), (j, k, cot_alpha), (k, i, cot_beta)]:
+        for (p, q, w) in [
+            (i, j, cot_gamma),  # edge opposite to k
+            (j, k, cot_alpha),  # edge opposite to i
+            (k, i, cot_beta)  # edge opposite to j
+        ]:
+            I.append(p)
+            J.append(q)
+            W.append(w)
+
+    W = sp.coo_matrix((W, (I, J)), shape=(n, n))
+    W = 0.5 * (W + W.T)  # symmetrize
+
+    d = np.asarray(W.sum(axis=1)).ravel()
+    D = sp.diags(d)
+
+    return D - W
+
+
+def get_modified_cotangent_weights_laplacian_matrix(mesh):
+    """
+    Compute cotangent weights for a triangular mesh
+    Inputs:
+        V: (n,3) array of vertex positions
+        F: (m,3) array of triangle indices
+    Returns:
+        W: sparse (n,n) symmetric matrix of cotangent weights
+    """
+    vertices = mesh.vertices
+    faces = mesh.faces
+    n = len(vertices)
+
+    # vertices concavity check
+    vertex_neighbors = mesh.vertex_neighbors
+    vertex_normals = mesh.vertex_normals
+    vertex_neighbor_avg_pos = np.array([
+        vertices[neighbor_ids].mean(axis=0)
+        if len(neighbor_ids) > 0 else vertices[vid]
+        for vid, neighbor_ids in enumerate(vertex_neighbors)
+    ])
+
+    delta_positions = vertex_neighbor_avg_pos - vertices
+    dot_products = np.sum(vertex_normals * delta_positions, axis=1)
+    concave_vertices = dot_products > 0.000001  # concave if dot product is positive
+
+    I, J, W = [], [], []
+    for tri in faces:
+        i, j, k = tri
+        vi, vj, vk = vertices[i], vertices[j], vertices[k]
+
+        cot_alpha = cotangent(vi, vj, vk)  # angle at i
+        cot_beta = cotangent(vj, vk, vi)  # angle at j
+        cot_gamma = cotangent(vk, vi, vj)  # angle at k
+
+        for (p, q, w) in [
+            (i, j, cot_gamma),  # edge opposite to k
+            (j, k, cot_alpha),  # edge opposite to i
+            (k, i, cot_beta)  # edge opposite to j
+        ]:
+            if concave_vertices[p] or concave_vertices[q]:
+                w *= 0.001  # reduce weight for concave vertices
+            w *= 0.5
             I += [p, q]
             J += [q, p]
             W += [w, w]
 
-    # 构造稀疏矩阵
     W = sp.coo_matrix((W, (I, J)), shape=(n, n))
-    # 对每条边权重取 1/2 (标准定义)
-    W *= 0.5
-
     d = np.asarray(W.sum(axis=1)).ravel()
     D = sp.diags(d)
 
