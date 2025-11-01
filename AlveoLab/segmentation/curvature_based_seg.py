@@ -33,7 +33,7 @@ class CurvatureBasedSeg:
         # We are only looking for the crease where tooth meets gum. Creases / slots / grooves are
         # represented with a negative sign in `mesh.curvature.signed` whereas bumps have positive
         # sign. .clip(max=0) sets all positive values to 0.
-        creases_only = -self._curvature_per_triangle.clip(max=0)
+        creases_only = -self.edge_curvature_face_view .clip(max=0)
 
         # An L2 norm seemed to work well, hence the square.
         # return np.ascontiguousarray((creases_only ** 2).clip(max=self._MAX_COST * 1.1))
@@ -69,7 +69,7 @@ class CurvatureBasedSeg:
         return filtered_peaks
 
     # def plot_curvature_hist(self):
-    #     plt.hist(self._curvature, bins=30)
+    #     plt.hist(self.edge_curvature, bins=30)
     #     plt.show()
     #
     # def plot_peak_spread_region(self, peak_idx):
@@ -92,7 +92,9 @@ class CurvatureBasedSeg:
         self._mesh = mesh
         self._orienter = orienter
         self._peak_indices = peaks_idx
-        self._faces_adj = get_face_face_adjacency(self._mesh)
+
+        self.faces_adj = get_face_face_adjacency(self._mesh)
+        self.edge_curvature, self.edge_curvature_face_view = get_edge_based_curvature(self._mesh, get_map=True)
 
         self.peak_masks = {}  # peak_id : triangle_mask
         self.peak_costs = {}  # peak_id : accumulative cost to each triangle
@@ -109,7 +111,6 @@ class CurvatureBasedSeg:
         self._run()
 
     def _run(self):
-        self._calculate_curvature()
         self._spread_from_peaks()
         self._build_quadratic()
         self._build_overlapping_area_groups()
@@ -120,10 +121,6 @@ class CurvatureBasedSeg:
 
         self._group_inline_area_groups()
         self._build_teeth()
-
-    def _calculate_curvature(self):
-        self._curvature, self._curvature_per_triangle = \
-            get_edge_based_curvature(self._mesh, get_map=True)
 
     def _spread_from_peaks(self):
         for peak in self._peak_indices:
@@ -138,7 +135,7 @@ class CurvatureBasedSeg:
 
         # init queue and shortest flags
         is_shortest = np.zeros(self._mesh.faces.shape[0], dtype=bool)  # 1 means the face's minimum accumulative cost
-        faces_init = self._faces_adj[peak_triangles].reshape(-1)  # has been got
+        faces_init = self.faces_adj[peak_triangles].reshape(-1)  # has been got
         que = queue.PriorityQueue()
         [que.put((accumulative_cost[face], face)) for face in faces_init]
 
@@ -161,7 +158,7 @@ class CurvatureBasedSeg:
                     return
                     # continue
 
-                face_adj = self._faces_adj[face]
+                face_adj = self.faces_adj[face]
                 edges_cost_adj = costs[face]
                 for i, face_ in enumerate(face_adj):
                     if accumulative_cost[face] + edges_cost_adj[i] < accumulative_cost[face_]:

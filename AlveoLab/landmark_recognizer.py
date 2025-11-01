@@ -166,7 +166,7 @@ class LandmarkRecognizer:
         # self.peak_indices = peak_indices
         self.discarded_peaks['Near Boundary'] = set(self.peak_indices[~keep_mask])
         self.peak_indices = self.peak_indices[keep_mask]
-        self._horizontal_hull = hull.vertices
+        self.horizontal_hull = hull.vertices
 
     def _remove_peaks_on_gingiva(self):
         """

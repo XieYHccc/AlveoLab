@@ -17,13 +17,21 @@ class LandmarkRecognizerVisualization:
         self.plotter = get_dental_plotter()
         self.mesh = landmark_recognizer.mesh
         self.orienter = self.lr.orienter
+
+        # setup pyvista mesh
         faces_pv = np.hstack([np.full((self.mesh.faces.shape[0], 1), 3), self.mesh.faces]).flatten()
         self.pv_mesh = pv.PolyData(self.mesh.vertices, faces_pv)
         colors = np.tile(self.MESH_BACKGROUND_COLOR, (self.mesh.faces.shape[0], 1))
         self.pv_mesh.cell_data["colors"] = colors
 
+        # horizontal projections
         self.uv = np.c_[inner_product(self.mesh.vertices, self.orienter.right),
                         inner_product(self.mesh.vertices, self.orienter.forward)]
+
+        # plot settings
+        self.mesh_plot_attribute =''
+        self.mesh_plot_attribute_is_rgb = False
+        self.cmap = ''
 
     def plot_valid_peaks(self):
         for peak_idx in self.lr.peak_indices:
@@ -40,6 +48,8 @@ class LandmarkRecognizerVisualization:
         for tooth in self.lr.teeth:
             colors = np.random.rand(3)
             self.pv_mesh.cell_data["colors"][tooth.mask] = colors
+            self.mesh_plot_attribute = "colors"
+            self.mesh_plot_attribute_is_rgb = True
 
     def plot_orientation_axes(self):
         arrow_start = self.orienter.center
@@ -74,9 +84,46 @@ class LandmarkRecognizerVisualization:
         plt.scatter(self.uv[:, 0], self.uv[:, 1], s=2, alpha=0.25, label="all vertices")
         plt.plot(self.uv[order, 0], self.uv[order, 1], "r-", lw=2, label="convex hull")
 
+    def plot_edge_based_curvature(self):
+        edges = self.mesh.face_adjacency_edges
+
+        curvature = self.lr.seg.edge_curvature.copy()
+        lower, upper = np.percentile(curvature, [5, 95])
+        curvature = np.clip(curvature, lower, upper)
+        vertex_weights = np.zeros(self.mesh.vertices.shape[0])
+        counts = np.zeros(self.mesh.vertices.shape[0])
+        for (i, j), w in zip(edges, curvature):
+            vertex_weights[i] += w
+            vertex_weights[j] += w
+            counts[i] += 1
+            counts[j] += 1
+
+        vertex_weights = np.divide(vertex_weights, counts, out=np.zeros_like(vertex_weights), where=counts!=0)
+        self.pv_mesh.point_data["vertex_weights"] = vertex_weights
+        self.mesh_plot_attribute = "vertex_weights"
+        self.mesh_plot_attribute_is_rgb = False
+        self.cmap = 'RdBu'
+
+    def plot_dental_quadratic(self):
+        x = np.linspace(-30, 30, 400)
+        y = self.lr.seg.quadratic.quadratic_2d(x)
+        points_2d = np.column_stack((x, y))
+        points_3d = self.lr.seg.quadratic.to_3d(points_2d)
+
+        n_points = len(points_3d)
+        lines = np.hstack([[n_points], np.arange(n_points)])
+        curve = pv.PolyData(points_3d)
+        curve.lines = lines
+
+        self.plotter.add_mesh(curve, color='red', line_width=3)
+
     def show(self):
-        self.plotter.add_mesh(self.pv_mesh, scalars="colors", rgb=True, opacity=1.0,
-                              specular=0.4, specular_power=10, ambient=0.2)
+        if self.mesh_plot_attribute_is_rgb:
+            self.plotter.add_mesh(self.pv_mesh, scalars=self.mesh_plot_attribute, rgb=True,
+                                  opacity=1.0, specular=0.4, specular_power=10, ambient=0.2)
+        else:
+            self.plotter.add_mesh(self.pv_mesh, scalars=self.mesh_plot_attribute, cmap=self.cmap,
+                                  opacity=1.0, specular=0.4, specular_power=10, ambient=0.2)
         self.plotter.show()
 
         plt.show()
@@ -95,8 +142,10 @@ if __name__ == '__main__':
     viz.plot_valid_peaks()
     viz.plot_discarded_peaks("Spilled Peaks", color='red')
     viz.plot_teeth()
-    viz.plot_teeth_obbs()
+    # viz.plot_teeth_obbs()
     viz.plot_orientation_axes()
-    viz.plot_horizon_components()
-    viz.plot_horizon_convex_hull()
+    #viz.plot_edge_based_curvature()
+    #viz.plot_horizon_components()
+    #viz.plot_horizon_convex_hull()
+    viz.plot_dental_quadratic()
     viz.show()
