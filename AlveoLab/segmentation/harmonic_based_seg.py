@@ -1,6 +1,7 @@
 import scipy.sparse.linalg as spla
 
-from AlveoLab.trimesh_utils import get_cotangent_weights_laplacian_matrix, build_Ab_from_L_and_constraints
+from AlveoLab.trimesh_utils import (get_cotangent_weights_laplacian_matrix, build_Ab_from_L_and_constraints,
+                                    get_modified_cotangent_weights_laplacian_matrix)
 from AlveoLab.utils import LazyAttribute
 
 
@@ -11,10 +12,12 @@ def solve_harmonic(A, b):
     # 用 SciPy 直接解；实际工程建议用 CHOLMOD（论文同源）以更快更稳
     return spla.spsolve(ATA.tocsc(), ATb)
 
+
 class HarmonicBasedSeg:
     """
     To refine the tooth segmentation results from curvature-based segmentation
     """
+
     def __init__(self, dental_mesh, teeth, discarded_peaks, dental_quadratic):
         self.dental_mesh = dental_mesh
         self.teeth = teeth
@@ -28,7 +31,7 @@ class HarmonicBasedSeg:
 
     @LazyAttribute
     def laplacian_matrix(self):
-        return get_cotangent_weights_laplacian_matrix(self.dental_mesh)
+        return get_modified_cotangent_weights_laplacian_matrix(self.dental_mesh)
 
     def _run(self):
         self._sort_teeth()
@@ -45,7 +48,7 @@ class HarmonicBasedSeg:
             root = self.dental_quadratic.get_root_at(center)
             tooth_roots.append((root, i))
         tooth_roots.sort(key=lambda x: x[0])
-        self.odd_teeth_args  = [arg for idx, (_, arg) in enumerate(tooth_roots) if idx % 2 == 1]
+        self.odd_teeth_args = [arg for idx, (_, arg) in enumerate(tooth_roots) if idx % 2 == 1]
         self.non_odd_teeth_args = [arg for idx, (_, arg) in enumerate(tooth_roots) if idx % 2 == 0]
 
     def _compute_harmonic_field(self):
@@ -72,7 +75,3 @@ class HarmonicBasedSeg:
         )
 
         self.harmonic_field = solve_harmonic(A, b)
-
-
-
-

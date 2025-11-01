@@ -73,9 +73,9 @@ def get_spread_regions_color(lr : LandmarkRecognizer):
 
 if __name__ == '__main__':
     #mesh: tm.Trimesh = tm.load_mesh('../data/1JMandibular_export.stl')
-    mesh: tm.Trimesh = tm.load_mesh('../data/models10y/0674_10 YR_Mandibular_export.stl')
+    mesh: tm.Trimesh = tm.load_mesh('../data/models10y/0580_10yr_Maxillary_export.stl')
 
-    landmark_recognizer = LandmarkRecognizer(mesh, 'L')
+    landmark_recognizer = LandmarkRecognizer(mesh, 'U')
     mesh = landmark_recognizer.mesh
 
     # plotting
@@ -93,14 +93,14 @@ if __name__ == '__main__':
     face_colors, peak_colors = get_spread_regions_color(landmark_recognizer)
     pv_mesh.cell_data["colors"] = face_colors
     # lower, upper = np.percentile(curv, [5, 95])
-    # hf = landmark_recognizer.harmonic_filed
-    # lower, upper = np.percentile(hf, [5, 95])
-    # # 将离群值clamp到这个范围
-    # hf_clamped = np.clip(hf, lower, upper)
-    # pv_mesh.point_data["harmonic_filed"] = hf
-    #plotter.add_mesh(pv_mesh, scalars="harmonic_filed", opacity=1.0, specular=0.4, specular_power=10, ambient=0.2)
+    hf = landmark_recognizer.harmonic_filed
+    lower, upper = np.percentile(hf, [5, 95])
+    # 将离群值clamp到这个范围
+    hf_clamped = np.clip(hf, lower, upper)
+    pv_mesh.point_data["harmonic_filed"] = hf_clamped
+    plotter.add_mesh(pv_mesh, scalars="harmonic_filed", opacity=1.0, specular=0.4, specular_power=10, ambient=0.2)
 
-    plotter.add_mesh(pv_mesh, scalars="colors", rgb=True, opacity=1.0, specular=0.4, specular_power=10, ambient=0.2)
+    # plotter.add_mesh(pv_mesh, scalars="colors", rgb=True, opacity=1.0, specular=0.4, specular_power=10, ambient=0.2)
 
     # add peaks
     # discarded_peaks = np.array(list(landmark_recognizer._seg.discarded_peaks['Spilled Peaks']))
