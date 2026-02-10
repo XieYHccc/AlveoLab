@@ -12,7 +12,7 @@ from AlveoLab.trimesh_utils import (get_local_maximum_along_dir, get_local_maxim
                                     discrete_mean_curvature_measure, smooth_curvature)
 from AlveoLab.segmentation.curvature_based_seg import CurvatureBasedSeg
 from AlveoLab.segmentation.harmonic_based_seg import HarmonicBasedSeg
-
+from AlveoLab.mesh import Mesh
 logger = get_logger("landmark_recognizer.py", level=logging.DEBUG)
 
 
@@ -128,7 +128,7 @@ class LandmarkRecognizer:
 
         merged = tm.util.concatenate(filtered)
         assert len(merged.split(only_watertight=False)) == 1  # should be a single mesh now
-        self.mesh = merged
+        self.mesh = Mesh(merged)
 
     def _find_peaks(self):
         # 1. get local maxima along occlusal direction
@@ -210,10 +210,13 @@ class LandmarkRecognizer:
 
     def _segment_teeth(self):
         self.seg = CurvatureBasedSeg(self.mesh, self.orienter, self.peak_indices)
-        self.discarded_peaks.update(self.seg.discarded_peaks)
+        for reason, peaks in self.seg.discarded_peaks.items():
+            self.discarded_peaks[reason].update(
+                (p.index if hasattr(p, "index") else int(p)) for p in peaks
+            )
 
         # update peak indices after segmentation, spilled peaks are removed
-        self.peak_indices = self.seg.valid_peaks
+        self.peaks = self.seg.valid_peaks
         self.teeth = self.seg.teeth
 
     def _label_teeth(self):

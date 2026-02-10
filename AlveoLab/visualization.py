@@ -1,16 +1,20 @@
 import pyvista as pv
 import numpy as np
 import matplotlib
-
+from trimesh.bounds import oriented_bounds_2D
 import matplotlib.pyplot as plt
+
+from AlveoLab.mesh import Mesh
 from AlveoLab.pyvista_utils import get_dental_plotter, draw_obb
 from AlveoLab.math.geometry import inner_product
+from AlveoLab.utils import load_labels
 
 matplotlib.use("TkAgg")
 
 
 class LandmarkRecognizerVisualization:
-    MESH_BACKGROUND_COLOR = [1.0, 1.0, 1.0]
+    # MESH_BACKGROUND_COLOR = [1.0, 1.0, 1.0]
+    MESH_BACKGROUND_COLOR = [1.0, 0.6, 0.6]
 
     def __init__(self, landmark_recognizer):
         self.lr = landmark_recognizer
@@ -26,36 +30,97 @@ class LandmarkRecognizerVisualization:
 
         # horizontal projections
         self.uv = np.c_[inner_product(self.mesh.vertices, self.orienter.right),
-                        inner_product(self.mesh.vertices, self.orienter.forward)]
+        inner_product(self.mesh.vertices, self.orienter.forward)]
 
         # plot settings
-        self.mesh_plot_attribute =''
+        self.mesh_plot_attribute = ''
         self.mesh_plot_attribute_is_rgb = False
         self.cmap = ''
 
-    def plot_valid_peaks(self):
-        for peak_idx in self.lr.peak_indices:
-            peak_point = self.lr.mesh.vertices[peak_idx]
-            self.plotter.add_mesh(pv.Sphere(radius=0.5, center=peak_point), color='blue')
-
-    def plot_discarded_peaks(self, discarded_type, color='red'):
-        discarded_peaks = np.array(list(self.lr.discarded_peaks[discarded_type]))
-        for peak_idx in discarded_peaks:
-            peak_point = self.lr.mesh.vertices[peak_idx]
+    def plot_valid_peaks(self, color):
+        for peak in self.lr.seg.valid_peaks:
+            peak_point = peak.point
             self.plotter.add_mesh(pv.Sphere(radius=0.5, center=peak_point), color=color)
 
-    def plot_teeth(self):
-        for tooth in self.lr.teeth:
-            colors = np.random.rand(3)
-            self.pv_mesh.cell_data["colors"][tooth.mask] = colors
-            self.mesh_plot_attribute = "colors"
-            self.mesh_plot_attribute_is_rgb = True
+    def plot_discarded_peaks(self, discarded_type, color='red'):
+        if discarded_type == "All":
+            # 合并所有 discarded_peaks
+            all_peaks = set()
+            for peaks in self.lr.discarded_peaks.values():
+                all_peaks.update(peaks)
+            discarded_peaks = np.array(list(all_peaks))
+        else:
+            discarded_peaks = np.array(
+                list(self.lr.discarded_peaks.get(discarded_type, []))
+            )
 
-    def plot_orientation_axes(self):
+        for peak_idx in discarded_peaks:
+            peak_point = self.lr.mesh.vertices[peak_idx]
+            self.plotter.add_mesh(
+                pv.Sphere(radius=0.5, center=peak_point),
+                color=color
+            )
+
+    def plot_peak_masks(self, peak, color):
+        peak_masks = self.lr.seg.peak_masks[peak]
+        self.pv_mesh.cell_data["colors"][peak_masks] = color
+        self.mesh_plot_attribute = "colors"
+        self.mesh_plot_attribute_is_rgb = True
+
+    def plot_teeth(self):
+        # for tooth in self.lr.teeth:
+        #     colors = np.random.rand(3)
+        #     self.pv_mesh.cell_data["colors"][tooth.mask] = colors
+        #     self.mesh_plot_attribute = "colors"
+        #     self.mesh_plot_attribute_is_rgb = True
+        """
+        给每颗牙随机上色，并在牙的中心位置标注编号（例如 palmer 或索引），
+        文本颜色和牙的颜色一致。
+        """
+        # 预先取出三角面中心，后面算每颗牙的质心用
+        tri_centers = self.mesh.triangles_center
+
+        for idx, tooth in enumerate(self.lr.teeth):
+            # 1. 随机一个颜色
+            color = np.random.rand(3)
+            # 2. 给这颗牙对应的三角形上色（tooth.mask 是一个 face-level 的布尔掩码或索引）
+            self.pv_mesh.cell_data["colors"][tooth.mask] = color
+            # 3. 计算这颗牙的大致几何中心（用三角面中心的平均）
+            tooth_centers = tri_centers[tooth.mask]
+            center = tooth_centers.mean(axis=0)
+            # 4. 取牙的“编号”：优先用 palmer，没有就用索引
+            if hasattr(tooth, "palmer"):
+                label = str(tooth.palmer)
+            else:
+                label = f"{idx}"
+
+            # # 5. 在牙的中心位置画文字标签，颜色和牙的颜色一致
+            # self.plotter.add_point_labels(
+            #     [center],          # 一个点
+            #     [label],           # 对应的标签
+            #     point_size=0,      # 不显示点，只显示文字
+            #     font_size=16,
+            #     text_color=color,  # 文字颜色 = 牙的颜色
+            #     render_points_as_spheres=False,
+            #     always_visible=True,
+            # )
+
+        self.mesh_plot_attribute = "colors"
+        self.mesh_plot_attribute_is_rgb = True
+
+    def plot_discarded_overlapping_areas(self):
+        for groups in self.lr.seg.discarded_overlap_groups.values():
+            for group in groups:
+                colors = np.random.rand(3)
+                self.pv_mesh.cell_data["colors"][group.mask] = colors
+                self.mesh_plot_attribute = "colors"
+                self.mesh_plot_attribute_is_rgb = True
+
+    def plot_orientation_axes(self, scale=6):
         arrow_start = self.orienter.center
-        arrow_up = pv.Arrow(arrow_start, self.orienter.up, scale=6)
-        arrow_right = pv.Arrow(arrow_start, self.orienter.right, scale=6)
-        arrow_forward = pv.Arrow(arrow_start, self.orienter.forward, scale=6)
+        arrow_up = pv.Arrow(arrow_start, self.orienter.up, scale=scale)
+        arrow_right = pv.Arrow(arrow_start, self.orienter.right, scale=scale)
+        arrow_forward = pv.Arrow(arrow_start, self.orienter.forward, scale=scale)
         # arrow_labels = ['Up', 'Right', 'Forward']
         # self.plotter.add_point_labels(
         #     [arrow_start + self.orienter.up * 4, arrow_start + self.orienter.right * 4, arrow_start + self.orienter.forward * 4],
@@ -70,6 +135,16 @@ class LandmarkRecognizerVisualization:
             ["  Up", "green"]
         ], bcolor="gray", face=pv.Arrow(), loc="upper right", size=(0.2, 0.2))
 
+    def plot_tooth_orientations(self):
+        for tooth in self.lr.teeth:
+            center = tooth.odom.centre_of_mass
+            arrow_up = pv.Arrow(center, tooth.odom.occlusal.vector, scale=4)
+            arrow_right = pv.Arrow(center, tooth.odom.buccal.vector, scale=4)
+            arrow_forward = pv.Arrow(center, tooth.odom.distal.vector, scale=4)
+            self.plotter.add_mesh(arrow_up, color='green')
+            self.plotter.add_mesh(arrow_right, color='red')
+            self.plotter.add_mesh(arrow_forward, color='blue')
+
     def plot_teeth_obbs(self):
         for tooth in self.lr.teeth:
             draw_obb(self.plotter, tooth.obb, color=(1, 0, 0))
@@ -81,12 +156,49 @@ class LandmarkRecognizerVisualization:
         # 画所有点 + 凸包折线（闭合）
         order = np.r_[self.lr.horizontal_hull, self.lr.horizontal_hull[0]]  # 闭合回到起点
 
-        plt.scatter(self.uv[:, 0], self.uv[:, 1], s=2, alpha=0.25, label="all vertices")
-        plt.plot(self.uv[order, 0], self.uv[order, 1], "r-", lw=2, label="convex hull")
+        plt.scatter(self.uv[:, 0], self.uv[:, 1], s=2, alpha=0.9, label="Projected Vertices", color='pink')
+        plt.plot(self.uv[order, 0], self.uv[order, 1], "b-", lw=2, label="Convex Hull")
+
+    def plot_horizon_bounding_box(self, ax=None):
+        # 1. 原始点（例如你的地平线 hull）
+        hull_vertices = self.uv[self.lr.horizontal_hull]
+
+        # 2. 求 OBB 变换和尺寸
+        transform, extents = oriented_bounds_2D(hull_vertices)
+        w, h = extents
+
+        # 3. 在 OBB 坐标系中构造矩形四个角（中心在原点）
+        #    这里用齐次坐标 (x, y, 1) 方便乘 3x3 矩阵
+        corners_local = np.array([
+            [-w / 2, -h / 2, 1.0],
+            [w / 2, -h / 2, 1.0],
+            [w / 2, h / 2, 1.0],
+            [-w / 2, h / 2, 1.0]
+        ])
+
+        # 4. transform 是把 “原始点 -> OBB 坐标系”
+        #    所以要画到原始坐标系，需要用它的逆
+        T_inv = np.linalg.inv(transform)
+        corners_world = (T_inv @ corners_local.T).T[:, :2]
+
+        # 为了闭合矩形，把第一个点再接到最后
+        corners_world_closed = np.vstack([corners_world, corners_world[0]])
+
+        # 5. 画图
+
+        # # 画原始点
+        # plt.scatter(hull_vertices[:, 0], hull_vertices[:, 1], s=5, alpha=0.4, label="hull points")
+
+        # 画 OBB
+        plt.plot(corners_world_closed[:, 0], corners_world_closed[:, 1], linewidth=2, label="Minmum bounding box",
+                 color='red')
+
+        # # 所有点
+        # plt.scatter(self.uv[:, 0], self.uv[:, 1], s=2, alpha=0.25, label="all vertices")
+        plt.legend()
 
     def plot_edge_based_curvature(self):
         edges = self.mesh.face_adjacency_edges
-
         curvature = self.lr.seg.edge_curvature.copy()
         lower, upper = np.percentile(curvature, [5, 95])
         curvature = np.clip(curvature, lower, upper)
@@ -98,11 +210,12 @@ class LandmarkRecognizerVisualization:
             counts[i] += 1
             counts[j] += 1
 
-        vertex_weights = np.divide(vertex_weights, counts, out=np.zeros_like(vertex_weights), where=counts!=0)
+        vertex_weights = np.divide(vertex_weights, counts, out=np.zeros_like(vertex_weights), where=counts != 0)
+        vertex_weights = np.maximum(-vertex_weights, 0.0)
         self.pv_mesh.point_data["vertex_weights"] = vertex_weights
         self.mesh_plot_attribute = "vertex_weights"
         self.mesh_plot_attribute_is_rgb = False
-        self.cmap = 'RdBu'
+        self.cmap = 'Reds'
 
     def plot_dental_quadratic(self):
         x = np.linspace(-30, 30, 400)
@@ -117,35 +230,94 @@ class LandmarkRecognizerVisualization:
 
         self.plotter.add_mesh(curve, color='red', line_width=3)
 
-    def show(self):
+    def plot_mesh(self):
         if self.mesh_plot_attribute_is_rgb:
             self.plotter.add_mesh(self.pv_mesh, scalars=self.mesh_plot_attribute, rgb=True,
-                                  opacity=1.0, specular=0.4, specular_power=10, ambient=0.2)
-        else:
+                                  opacity=1.0, specular=0.2, specular_power=5, ambient=0.2)
+        elif self.mesh_plot_attribute != '':
             self.plotter.add_mesh(self.pv_mesh, scalars=self.mesh_plot_attribute, cmap=self.cmap,
-                                  opacity=1.0, specular=0.4, specular_power=10, ambient=0.2)
-        self.plotter.show()
+                                  opacity=1.0, specular=0.2, specular_power=5, ambient=0.2)
+        else:
+            self.plotter.add_mesh(self.pv_mesh, color=self.MESH_BACKGROUND_COLOR,
+                                  opacity=1.0, specular=0.2, specular_power=5, ambient=0.2)
 
+        # self.plotter.add_mesh(self.pv_mesh,point_size=3,render_points_as_spheres=True,color="pink")
+
+    def show(self):
+        self.plotter.show()
         plt.show()
 
+    # for draw two meshes
+    def add_mesh(self, trimesh):
+        # setup pyvista mesh
+        faces_pv = np.hstack([np.full((trimesh.faces.shape[0], 1), 3), trimesh.faces]).flatten()
+        pv_mesh = pv.PolyData(trimesh.vertices, faces_pv)
+        colors = np.tile(self.MESH_BACKGROUND_COLOR, (trimesh.faces.shape[0], 1))
+        pv_mesh.cell_data["colors"] = colors
+        self.plotter.add_mesh(pv_mesh, color=self.MESH_BACKGROUND_COLOR,
+                              opacity=1.0, specular=0.2, specular_power=5, ambient=0.2)
+
+    def add_mesh_with_labels(self, mesh, labels):
+        palette = np.array([
+            [255, 153, 153],  # gingiva
+            [153, 76, 0], [153, 153, 0], [76, 153, 0], [0, 153, 153], [0, 0, 153], [153, 0, 153],
+            [255, 128, 0], [153, 153, 0], [76, 153, 0], [0, 153, 153], [0, 0, 153], [153, 0, 153],
+        ]) / 255
+
+        palette[7:] *= 0.4
+        # setup pyvista mesh
+        faces_pv = np.hstack([np.full((mesh.faces.shape[0], 1), 3), mesh.faces]).flatten()
+        pv_mesh = pv.PolyData(mesh.vertices, faces_pv)
+
+        max_id = palette.shape[0] - 1
+        # 如果label超出范围：这里用clip兜底；你也可以选择 raise
+        labels_safe = np.clip(labels.astype(np.int64), 0, max_id)
+
+        rgb = (palette[labels_safe] * 255).astype(np.uint8)  # (N,3) uint8 更适合pyvista显示
+        pv_mesh.point_data["rgb"] = rgb
+        self.plotter.add_mesh(pv_mesh, scalars="rgb", rgb=True,
+                              opacity=1.0, specular=0.1, specular_power=5, ambient=0.2)
 
 if __name__ == '__main__':
     import trimesh as tm
     from AlveoLab.landmark_recognizer import LandmarkRecognizer
 
     # mesh: tm.Trimesh = tm.load_mesh('../data/1JMandibular_export.stl')
-    mesh: tm.Trimesh = tm.load_mesh('../data/models10y/0674_10 YR_Mandibular_export.stl')
+    mesh1: tm.Trimesh = tm.load_mesh('../data/models5y/0609_5 YR_Mandibular_export.stl')
+    mesh: tm.Trimesh = tm.load_mesh('../data/labeld_5year_betterv_objs/0709_5 YR_Mandibular_export.obj')
+    labels1 = load_labels('../data/labeld_5year_betterv_objs/0580_5yr_Maxillary_export.json')
 
-    landmark_recognizer = LandmarkRecognizer(mesh, 'L')
+    mesh2 = Mesh.from_file('../data/labeld_5year_betterv_objs/0709_5 YR_Maxillary_export.obj')
+    landmark_recognizer = LandmarkRecognizer(mesh2, 'U')
+    #
+    # for peak in landmark_recognizer.seg.peaks:
+    #     viz = LandmarkRecognizerVisualization(landmark_recognizer)
+    #     viz.plot_valid_peaks("blue")
+    #     viz.plot_discarded_peaks("Spilled", color='red')
+    #     color = (1, 0, 0) if peak.spilled else (0, 1, 0)
+    #     viz.plot_peak_masks(peak, color=color)
+    #     viz.plot_mesh()
+    #     viz.show()
 
     viz = LandmarkRecognizerVisualization(landmark_recognizer)
-    viz.plot_valid_peaks()
-    viz.plot_discarded_peaks("Spilled Peaks", color='red')
     viz.plot_teeth()
+    # viz.plot_discarded_overlapping_areas()
+    # viz.add_mesh_with_labels(mesh1, labels1)
+    viz.plot_valid_peaks("blue")
+    viz.plot_discarded_peaks("Spilled", color='red')
+    # viz.plot_discarded_peaks("All", color='red')
+    viz.plot_discarded_peaks("Gingiva Peaks", color='green')
+    viz.plot_discarded_peaks("Near Boundary", color='yellow')
+
+    # viz.plot_edge_based_curvature()
     # viz.plot_teeth_obbs()
-    viz.plot_orientation_axes()
-    #viz.plot_edge_based_curvature()
-    #viz.plot_horizon_components()
-    #viz.plot_horizon_convex_hull()
-    viz.plot_dental_quadratic()
+    # viz.plot_orientation_axes()
+    # viz.plot_tooth_orientations()
+    # viz.plot_edge_based_curvature()
+    # viz.plot_horizon_components()
+    # viz.plot_horizon_convex_hull()
+    # viz.plot_horizon_bounding_box()
+    # viz.plot_dental_quadratic()
+    viz.plot_mesh()
     viz.show()
+

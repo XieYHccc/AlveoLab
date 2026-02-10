@@ -65,7 +65,7 @@ def get_edge_based_curvature(mesh: Trimesh, get_map=False):
         d = defaultdict(list)
         [(d[a].append(curvature[i]), d[b].append(curvature[i])) for i, (a, b) in enumerate(mesh.face_adjacency)]
         curvature_map = np.array([
-            d[i] if len(d[i]) == 3 else [np.nan, np.nan, np.nan]
+            (d[i] + [np.nan] * (3 - len(d[i])))[:3]
             for i in range(len(mesh.faces))
         ])
         return curvature, curvature_map

@@ -12,7 +12,7 @@ class Tooth:
         self.palmer = palmer
         self.mesh = area_groups[0].mesh
         # self.peaks = np.concatenate([s.peaks for s in self.area_groups])
-        self.peaks = set().union(*(s.peaks for s in self.area_groups))
+        self.peaks = [p for s in self.area_groups for p in s.peaks]
         self.mask = mask_or(*(s.mask for s in self.area_groups))
         self.orienter = None
         self.parent_orienter = self.area_groups[0].quadratic.orienter

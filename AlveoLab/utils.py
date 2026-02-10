@@ -1,7 +1,8 @@
 import logging
 import time
 import types
-
+import operator
+import json
 import numpy as np
 
 now = time.time
@@ -115,6 +116,23 @@ def copy_name_wrapper(wrapper):
 class _LazyAttribute(property):
     pass
 
+def cached(cache_getter):
+    if isinstance(cache_getter, str):
+        cache_getter = operator.attrgetter(cache_getter)
+
+    @copy_name_wrapper
+    def wrapper(function):
+        def wrapped(self, *key):
+            cache = cache_getter(self)
+            if key in cache:
+                return cache[key]
+            out = function(self, *key)
+            cache[key] = out
+            return out
+
+        return wrapped
+
+    return wrapper
 
 def LazyAttribute(func):
     """
@@ -135,3 +153,45 @@ def LazyAttribute(func):
 
     return _LazyAttribute(getter, None, deleter, func.__doc__)
 
+
+def map_primary_label_to_flat_label(labels):
+    labels = labels.copy()
+    src = labels.copy()  # 关键：保留原始标签用于判断
+
+    mapping = {
+        # 恒牙
+        3: 12,
+        14: 6,
+
+        # 乳牙
+        22: 1,
+        23: 2,
+        24: 3,
+        25: 4,
+        26: 5,
+
+        21: 7,
+        20: 8,
+        19: 9,
+        18: 10,
+        17: 11,
+    }
+
+    # 默认：不在 mapping 里的值保持不变（或者你也可以设为 0/-1）
+    for s, d in mapping.items():
+        labels[src == s] = d
+
+    return labels
+
+def load_json(file_path):
+    with open(file_path, "r") as st_json:
+        return json.load(st_json)
+
+def load_labels(file_path):
+    loaded_json = load_json(file_path)
+    labels = np.array(loaded_json['labels']).reshape(-1, 1)
+
+    # map primary labels to 0-12
+    labels = map_primary_label_to_flat_label(labels)
+
+    return labels

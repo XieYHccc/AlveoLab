@@ -64,7 +64,7 @@ class OverlappingAreaGroup:
         self.mask = mask
         self.mesh = mesh
         self.orienter = orienter
-        self.peak_points = np.array([mesh.vertices[peak] for peak in self.peaks])
+        self.peak_points = np.array([peak.point for peak in self.peaks])
         self.quadratic = quadratic
         self.points = self.mesh.triangles_center[self.mask]
         self.centre_of_mass = geom.center_of_mass(self.points)
@@ -136,13 +136,13 @@ class OverlappingAreaGroup:
         # Step 3
         dx, dy = geom.get_components(units, self.buccal, self.orienter.occlusal)
 
-        # Step 4
-        num_buccal_face = dx[dx > 0.4].shape[0]
-        num_lingual_face = dx[dx < -0.6].shape[0]
-        buccal_ratio = num_buccal_face / units.shape[0]
-        lingual_ratio = num_lingual_face / units.shape[0]
-        if buccal_ratio < 0.05 or (1 - lingual_ratio - buccal_ratio) > 0.9:
-            return True
+        # # Step 4
+        # num_buccal_face = dx[dx > 0.4].shape[0]
+        # num_lingual_face = dx[dx < -0.6].shape[0]
+        # buccal_ratio = num_buccal_face / units.shape[0]
+        # lingual_ratio = num_lingual_face / units.shape[0]
+        # if buccal_ratio < 0.05 or (1 - lingual_ratio - buccal_ratio) > 0.9:
+        #     return True
 
         # Step 5
         thetas = np.arctan2(dy, dx)
@@ -183,6 +183,7 @@ class OverlappingAreaGroup:
 
         a = geom.inner_product(self.points, self.tangent)
         self.span = self.points[[np.argmin(a), np.argmax(a)]]
+
 
         heights = geom.inner_product(self.peak_points, self.orienter.occlusal)
 
