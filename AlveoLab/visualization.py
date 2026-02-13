@@ -13,8 +13,8 @@ matplotlib.use("TkAgg")
 
 
 class LandmarkRecognizerVisualization:
-    # MESH_BACKGROUND_COLOR = [1.0, 1.0, 1.0]
-    MESH_BACKGROUND_COLOR = [1.0, 0.6, 0.6]
+    MESH_BACKGROUND_COLOR = [1.0, 1.0, 1.0]
+    #MESH_BACKGROUND_COLOR = [1.0, 0.6, 0.6]
 
     def __init__(self, landmark_recognizer):
         self.lr = landmark_recognizer
@@ -37,10 +37,27 @@ class LandmarkRecognizerVisualization:
         self.mesh_plot_attribute_is_rgb = False
         self.cmap = ''
 
+    def plot_height_threshold_plane(self):
+        heights = np.inner(self.mesh.vertices, self.orienter.occlusal)  # (N,)
+        max_idx = int(np.argmax(heights))  # 最大值对应的vertex索引
+
+        # 计算水平面上的一个点（这里用原点加上法向量乘以高度阈值）
+        point_on_plane = self.mesh.vertices[max_idx] - self.orienter.occlusal * 10
+
+        # 创建一个大平面
+        plane_size = 200
+        plane = pv.Plane(center=point_on_plane, direction=self.orienter.occlusal, i_size=plane_size, j_size=plane_size)
+
+        # 绘制平面，设置半透明
+        self.plotter.add_mesh(plane, (98, 96, 170), opacity=0.5, specular=0.0, specular_power=5, ambient=0.2)
+
+    def plot_sphere_at_point(self, point, color, radius=0.5, opacity=0.8):
+        self.plotter.add_mesh(pv.Sphere(radius=radius, center=point), color=color, opacity=opacity)
+
     def plot_valid_peaks(self, color):
         for peak in self.lr.seg.valid_peaks:
             peak_point = peak.point
-            self.plotter.add_mesh(pv.Sphere(radius=0.5, center=peak_point), color=color)
+            self.plot_sphere_at_point(peak_point, color, 0.5, 0.8)
 
     def plot_discarded_peaks(self, discarded_type, color='red'):
         if discarded_type == "All":
@@ -54,16 +71,31 @@ class LandmarkRecognizerVisualization:
                 list(self.lr.discarded_peaks.get(discarded_type, []))
             )
 
-        for peak_idx in discarded_peaks:
-            peak_point = self.lr.mesh.vertices[peak_idx]
-            self.plotter.add_mesh(
-                pv.Sphere(radius=0.5, center=peak_point),
-                color=color
-            )
+        for peak in discarded_peaks:
+            peak_point = peak.point
+            self.plot_sphere_at_point(peak_point, color, 0.5, 0.8)
+
 
     def plot_peak_masks(self, peak, color):
         peak_masks = self.lr.seg.peak_masks[peak]
         self.pv_mesh.cell_data["colors"][peak_masks] = color
+        self.mesh_plot_attribute = "colors"
+        self.mesh_plot_attribute_is_rgb = True
+
+    def plot_all_valid_peak_masks(self):
+        for peak in self.lr.seg.valid_peaks:
+            color = np.random.rand(3)
+            peak_masks = self.lr.seg.peak_masks[peak]
+            self.pv_mesh.cell_data["colors"][peak_masks] = color
+
+        self.mesh_plot_attribute = "colors"
+        self.mesh_plot_attribute_is_rgb = True
+
+    def plot_all_overlapping_group_masks(self):
+        for group in self.lr.seg.overlapping_area_groups:
+            colors = np.random.rand(3)
+            self.pv_mesh.cell_data["colors"][group.mask] = colors
+
         self.mesh_plot_attribute = "colors"
         self.mesh_plot_attribute_is_rgb = True
 
@@ -117,15 +149,14 @@ class LandmarkRecognizerVisualization:
                 self.mesh_plot_attribute_is_rgb = True
 
     def plot_orientation_axes(self, scale=6):
+        tip_length = 0.25
+        tip_radius = 0.1
+        shaft_radius = 0.05
         arrow_start = self.orienter.center
-        arrow_up = pv.Arrow(arrow_start, self.orienter.up, scale=scale)
-        arrow_right = pv.Arrow(arrow_start, self.orienter.right, scale=scale)
-        arrow_forward = pv.Arrow(arrow_start, self.orienter.forward, scale=scale)
-        # arrow_labels = ['Up', 'Right', 'Forward']
-        # self.plotter.add_point_labels(
-        #     [arrow_start + self.orienter.up * 4, arrow_start + self.orienter.right * 4, arrow_start + self.orienter.forward * 4],
-        #     arrow_labels, italic=True, font_size=13, point_color='black', point_size=0,
-        #     render_points_as_spheres=True, always_visible=True)
+        arrow_up = pv.Arrow(arrow_start, self.orienter.up, scale=scale, tip_length=tip_length, tip_radius=tip_radius, shaft_radius=shaft_radius)
+        arrow_right = pv.Arrow(arrow_start, self.orienter.right, scale=scale, tip_length=tip_length, tip_radius=tip_radius, shaft_radius=shaft_radius)
+        arrow_forward = pv.Arrow(arrow_start, self.orienter.forward, scale=scale, tip_length=tip_length, tip_radius=tip_radius, shaft_radius=shaft_radius)
+
         self.plotter.add_mesh(arrow_up, color='green')
         self.plotter.add_mesh(arrow_right, color='red')
         self.plotter.add_mesh(arrow_forward, color='blue')
@@ -133,7 +164,7 @@ class LandmarkRecognizerVisualization:
             ["  Right", "red"],
             ["  Forward", "blue"],
             ["  Up", "green"]
-        ], bcolor="gray", face=pv.Arrow(), loc="upper right", size=(0.2, 0.2))
+        ], bcolor=None, border=False, face=pv.Arrow(), loc="center right", size=(0.1, 0.1))
 
     def plot_tooth_orientations(self):
         for tooth in self.lr.teeth:
@@ -218,10 +249,15 @@ class LandmarkRecognizerVisualization:
         self.cmap = 'Reds'
 
     def plot_dental_quadratic(self):
-        x = np.linspace(-30, 30, 400)
+        x = np.linspace(-30, 30, 600)
         y = self.lr.seg.quadratic.quadratic_2d(x)
         points_2d = np.column_stack((x, y))
         points_3d = self.lr.seg.quadratic.to_3d(points_2d)
+
+        # 沿 up 方向往上推
+        up = np.asarray(self.orienter.occlusal, dtype=float)
+        up /= (np.linalg.norm(up) + 1e-12)
+        points_3d = points_3d - up * 5
 
         n_points = len(points_3d)
         lines = np.hstack([[n_points], np.arange(n_points)])
@@ -233,13 +269,13 @@ class LandmarkRecognizerVisualization:
     def plot_mesh(self):
         if self.mesh_plot_attribute_is_rgb:
             self.plotter.add_mesh(self.pv_mesh, scalars=self.mesh_plot_attribute, rgb=True,
-                                  opacity=1.0, specular=0.2, specular_power=5, ambient=0.2)
+                                  opacity=1.0, specular=0.0, specular_power=5, ambient=0.2)
         elif self.mesh_plot_attribute != '':
             self.plotter.add_mesh(self.pv_mesh, scalars=self.mesh_plot_attribute, cmap=self.cmap,
-                                  opacity=1.0, specular=0.2, specular_power=5, ambient=0.2)
+                                  opacity=1.0, specular=0.0, specular_power=5, ambient=0.2)
         else:
             self.plotter.add_mesh(self.pv_mesh, color=self.MESH_BACKGROUND_COLOR,
-                                  opacity=1.0, specular=0.2, specular_power=5, ambient=0.2)
+                                  opacity=1.0, specular=0.0, specular_power=5, ambient=0.2)
 
         # self.plotter.add_mesh(self.pv_mesh,point_size=3,render_points_as_spheres=True,color="pink")
 
@@ -278,17 +314,157 @@ class LandmarkRecognizerVisualization:
         self.plotter.add_mesh(pv_mesh, scalars="rgb", rgb=True,
                               opacity=1.0, specular=0.1, specular_power=5, ambient=0.2)
 
+    def plot_peak_accumulative_cost_no_mask(
+            self,
+            peak,
+            cmap="jet_r",  # 低=红，高=蓝（像你示例图）
+            clip_percentile=(1, 99),  # 稳定显示，避免极端值拉爆色条
+            cap=None,  # 可选固定上限，例如 0.115
+            show_scalar_bar=True,
+            title="Minimum accumulated curvature costs",
+    ):
+        """单个 peak 的 accumulative cost（不按 peak_mask 裁剪）"""
+        costs = np.asarray(self.lr.seg.peak_costs[peak], dtype=float)  # face-level
+        n_faces = self.mesh.faces.shape[0]
+        if costs.shape[0] != n_faces:
+            raise ValueError("peak_costs 必须是 face-level，长度=mesh.faces.shape[0]")
+
+        finite = np.isfinite(costs)
+        if not finite.any():
+            return
+
+        # 显示范围
+        if cap is not None:
+            vmin = float(np.nanmin(costs[finite]))
+            vmax = float(cap)
+        else:
+            vmin, vmax = np.percentile(costs[finite], clip_percentile)
+            vmin, vmax = float(vmin), float(vmax)
+            if np.isclose(vmin, vmax):
+                vmax = vmin + 1e-6
+
+        # 把 inf / nan 压到 vmax，保证可视化稳定
+        scalars = costs.copy()
+        scalars[~np.isfinite(scalars)] = vmax
+        scalars = np.clip(scalars, vmin, vmax)
+
+        self.pv_mesh.cell_data["acc_cost_no_mask"] = scalars
+
+
+        self.plotter.add_mesh(
+            self.pv_mesh,
+            scalars="acc_cost_no_mask",
+            cmap=cmap,
+            clim=(vmin, vmax),
+            specular=0.0,
+            ambient=0.2,
+            show_scalar_bar=show_scalar_bar,
+            scalar_bar_args={"title": title} if show_scalar_bar else None,
+        )
+
+        # peak 点
+        self.plot_sphere_at_point(peak.point, color="black", radius=0.3, opacity=1.0)
+
+    def plot_all_peaks_accumulative_cost_no_mask(
+            self,
+            peaks=None,
+            mode="min",  # "min" or "mean"
+            cmap="jet_r",
+            clip_percentile=(1, 99),
+            cap=None,
+            show_scalar_bar=True,
+            title="Accumulated Curvature Costs",
+            show_peaks=True,
+    ):
+        """
+        所有 peaks 合成 cost 图（不使用 peak_mask）
+        - mode="min": 每个 face 取所有 peak 的最小 cost（最常用）
+        - mode="mean": 每个 face 取平均 cost
+        """
+        if peaks is None:
+            peaks = list(self.lr.seg.peaks)
+
+        n_faces = self.mesh.faces.shape[0]
+        all_costs = []
+
+        for p in peaks:
+            c = np.asarray(self.lr.seg.peak_costs[p], dtype=float)
+            if c.shape[0] != n_faces:
+                raise ValueError("peak_costs 必须是 face-level")
+            all_costs.append(c)
+
+        C = np.vstack(all_costs)  # (n_peaks, n_faces)
+
+        # 把 inf 当作很大值处理，避免 nanmin 报错
+        finite_any = np.isfinite(C).any(axis=0)
+        if not finite_any.any():
+            return
+
+        if mode == "min":
+            # 对每个 face 取最小有限值
+            C2 = C.copy()
+            C2[~np.isfinite(C2)] = np.inf
+            s = np.min(C2, axis=0)
+        elif mode == "mean":
+            C2 = C.copy()
+            C2[~np.isfinite(C2)] = np.nan
+            s = np.nanmean(C2, axis=0)
+        else:
+            raise ValueError("mode 只能是 'min' 或 'mean'")
+
+        finite = np.isfinite(s)
+        if cap is not None:
+            vmin = float(np.nanmin(s[finite]))
+            vmax = float(cap)
+        else:
+            vmin, vmax = np.percentile(s[finite], clip_percentile)
+            vmin, vmax = float(vmin), float(vmax)
+            if np.isclose(vmin, vmax):
+                vmax = vmin + 1e-6
+
+        s[~np.isfinite(s)] = vmax
+        s = np.clip(s, vmin, vmax)
+
+        self.pv_mesh.cell_data["acc_cost_all_no_mask"] = s
+        self.plotter.add_mesh(
+            self.pv_mesh,
+            scalars="acc_cost_all_no_mask",
+            cmap=cmap,
+            clim=(vmin, vmax),
+            specular=0.0,
+            ambient=0.2,
+            show_scalar_bar=show_scalar_bar,
+            scalar_bar_args={
+                "title": title,
+                "vertical": False,  # 横向
+                "width": 0.45,  # 变短（默认通常更长）
+                "height": 0.06,  # 厚度
+                "position_x": 0.27,  # 居中一点
+                "position_y": 0.03,  # 靠底部
+                "fmt": "%.3f",  # 数字格式
+                "n_labels": 5,
+            } if show_scalar_bar else None,
+        )
+
+        if show_peaks:
+            for p in peaks:
+                self.plot_sphere_at_point(p.point, color="black", radius=0.45, opacity=1.0)
+
+
 if __name__ == '__main__':
     import trimesh as tm
     from AlveoLab.landmark_recognizer import LandmarkRecognizer
 
     # mesh: tm.Trimesh = tm.load_mesh('../data/1JMandibular_export.stl')
-    mesh1: tm.Trimesh = tm.load_mesh('../data/models5y/0609_5 YR_Mandibular_export.stl')
-    mesh: tm.Trimesh = tm.load_mesh('../data/labeld_5year_betterv_objs/0709_5 YR_Mandibular_export.obj')
-    labels1 = load_labels('../data/labeld_5year_betterv_objs/0580_5yr_Maxillary_export.json')
+    # mesh1: tm.Trimesh = tm.load_mesh('../data/models5y/0609_5 YR_Mandibular_export.stl')
+    # mesh: tm.Trimesh = tm.load_mesh('../data/labeld_5year_betterv_objs/0709_5 YR_Mandibular_export.obj')
+    # labels1 = load_labels('../data/labeld_5year_betterv_objs/0580_5yr_Maxillary_export.json')
 
-    mesh2 = Mesh.from_file('../data/labeld_5year_betterv_objs/0709_5 YR_Maxillary_export.obj')
-    landmark_recognizer = LandmarkRecognizer(mesh2, 'U')
+    # mesh2 = Mesh.from_file('../data/models5y/0709_5 YR_Maxillary_export.stl')
+    mesh2 = Mesh.from_file('../data/models5y/0916_5 YR_Mandibular_export.stl')
+    # mesh2 = Mesh.from_file('../data/models5y/0800_5 year_Maxillary_export.stl')
+
+    landmark_recognizer = LandmarkRecognizer(mesh2, 'L')
     #
     # for peak in landmark_recognizer.seg.peaks:
     #     viz = LandmarkRecognizerVisualization(landmark_recognizer)
@@ -300,15 +476,14 @@ if __name__ == '__main__':
     #     viz.show()
 
     viz = LandmarkRecognizerVisualization(landmark_recognizer)
-    viz.plot_teeth()
+    # viz.plot_teeth()
     # viz.plot_discarded_overlapping_areas()
     # viz.add_mesh_with_labels(mesh1, labels1)
-    viz.plot_valid_peaks("blue")
-    viz.plot_discarded_peaks("Spilled", color='red')
-    # viz.plot_discarded_peaks("All", color='red')
-    viz.plot_discarded_peaks("Gingiva Peaks", color='green')
-    viz.plot_discarded_peaks("Near Boundary", color='yellow')
-
+    viz.plot_valid_peaks("black")
+    # viz.plot_discarded_peaks("Spilled", color='red')
+    viz.plot_discarded_peaks("All", color='black')
+    # viz.plot_discarded_peaks("Gingiva Peaks", color='green')
+    # viz.plot_discarded_peaks("No candidate passed", color='red')
     # viz.plot_edge_based_curvature()
     # viz.plot_teeth_obbs()
     # viz.plot_orientation_axes()
@@ -318,6 +493,25 @@ if __name__ == '__main__':
     # viz.plot_horizon_convex_hull()
     # viz.plot_horizon_bounding_box()
     # viz.plot_dental_quadratic()
+    viz.plot_height_threshold_plane()
+    # viz.plot_all_valid_peak_masks()
+    # viz.plot_all_overlapping_group_masks()
+    # viz.plot_mesh()
+    # viz.plotter.add_legend([
+    #         ["  OK", "green"],
+    #         ["  Geometry-check rejected", "red"],
+    #     ], bcolor=None, border=False, face=pv.Sphere(), loc="upper center", size=(0.1, 0.1))
+
+
+    # viz.plot_peak_accumulative_cost_no_mask(landmark_recognizer.seg.peaks[33])
+    # print(landmark_recognizer.seg.peak_max_costs[landmark_recognizer.seg.peaks[19]])
+    # landmark_recognizer.seg.parse_spread(landmark_recognizer.seg.peaks[32], 2)
+    # viz.plot_peak_masks(landmark_recognizer.seg.peaks[32], color=(0, 1, 0))
+    for idx, peak in enumerate(landmark_recognizer.seg.peaks):
+        if peak.spilled:
+            print(idx)
     viz.plot_mesh()
+    # landmark_recognizer.seg.parse_spread()
+    # viz.plot_all_peaks_accumulative_cost_no_mask()
     viz.show()
 

@@ -13,8 +13,9 @@ from AlveoLab.trimesh_utils import (get_local_maximum_along_dir, get_local_maxim
 from AlveoLab.segmentation.curvature_based_seg import CurvatureBasedSeg
 from AlveoLab.segmentation.harmonic_based_seg import HarmonicBasedSeg
 from AlveoLab.mesh import Mesh
-logger = get_logger("landmark_recognizer.py", level=logging.DEBUG)
+from AlveoLab.peak import Peak
 
+logger = get_logger("landmark_recognizer.py", level=logging.DEBUG)
 
 def _min_dist_points_to_segments(points, edges):
     """
@@ -50,20 +51,23 @@ def _min_dist_points_to_segments(points, edges):
 
 
 class LandmarkRecognizer:
-    _HEIGHT_DIFF_THRESHOLD = 9.0  # mm, height difference from the highest point to height threshold
+    HEIGHT_DIFF_THRESHOLD = 7  # mm, height difference from the highest point to height threshold
     _NEAR_BOUNDARY_DIST_THRESHOLD = 0.3  # mm, for filtering peaks near boundary
     _REMOVE_GUM_PEAKS_RATIO = 2  # vertical/horizontal ratio threshold for removing gum peaks
 
     def __init__(self, mesh, arch_type):
         self.mesh = mesh
         self.arch_type = arch_type
+
         self.orienter = None
+        self.horizontal_hull = None
+        self.seg = None
+        self.harmonic_seg = None
+
+        self.height_threshold = 0.0
+        self.peaks = []
         self.peak_indices = []  # indices of peak vertices
         self.discarded_peaks = collections.defaultdict(set)  # include "Too Low", "Near Boundary", "Gingiva Peaks"
-        self.horizontal_hull = None
-        self.height_threshold = 0.0
-
-        self.seg = None
 
         self._run()
 
@@ -104,9 +108,8 @@ class LandmarkRecognizer:
         self._run_step(self._find_orientation, "find_orientation")
 
         self.height_threshold = (np.inner(self.mesh.vertices, self.orienter.occlusal).max() -
-                            self._HEIGHT_DIFF_THRESHOLD)
-
-        self._run_step(self._preprocess_mesh, "preprocess_mesh")
+                            self.HEIGHT_DIFF_THRESHOLD)
+        # self._run_step(self._preprocess_mesh, "preprocess_mesh")
         self._run_step(self._find_peaks, "find_peaks")
         self._run_step(self._remove_peaks_near_boundary, "remove_peaks_near_boundary")
         self._run_step(self._remove_peaks_on_gingiva, "remove_peaks_on_gingiva")  #TODO: acutually not works well
@@ -119,7 +122,7 @@ class LandmarkRecognizer:
         self.orienter = PcaOrienter(self.mesh, self.arch_type)
 
     def _preprocess_mesh(self):
-        cutting_plane_offset = self.height_threshold - 3 #TODO: adaptive offset
+        cutting_plane_offset = self.height_threshold - 4 #TODO: adaptive offset
         faces_height = np.inner(self.mesh.triangles_center, self.orienter.occlusal)
 
         submeshes = self.mesh.submesh([faces_height > cutting_plane_offset], append=True).split(only_watertight=False)
@@ -147,6 +150,14 @@ class LandmarkRecognizer:
         self.discarded_peaks['Too Low'] = set(peak_indices[low_height_mask])
         self.peak_indices = peak_indices[~low_height_mask]
 
+        for idx in peak_indices[~low_height_mask]:
+            self.peaks.append(Peak(self.mesh.vertices[idx], idx))
+        self.peaks = np.array(self.peaks)
+
+        self.discarded_peaks['Too Low'] = set()
+        for idx in peak_indices[low_height_mask]:
+            self.discarded_peaks['Too Low'].add(Peak(self.mesh.vertices[idx], idx))
+
     def _remove_peaks_near_boundary(self):
         uv = np.c_[self.mesh.vertices @ self.orienter.right, self.mesh.vertices @ self.orienter.forward]
         # compute convex hull
@@ -164,7 +175,8 @@ class LandmarkRecognizer:
         keep_mask = d > self._NEAR_BOUNDARY_DIST_THRESHOLD
 
         # self.peak_indices = peak_indices
-        self.discarded_peaks['Near Boundary'] = set(self.peak_indices[~keep_mask])
+        self.discarded_peaks['Near Boundary'] = set(self.peaks[~keep_mask])
+        self.peaks = self.peaks[keep_mask]
         self.peak_indices = self.peak_indices[keep_mask]
         self.horizontal_hull = hull.vertices
 
@@ -205,15 +217,14 @@ class LandmarkRecognizer:
                     gingiva_peaks.add(lower_peak)
 
         # update
-        self.discarded_peaks['Gingiva Peaks'] = gingiva_peaks
+        self.discarded_peaks['Gingiva Peaks'] = set([peak for peak in self.peaks if peak.index in gingiva_peaks])
         self.peak_indices = np.array([p for p in peaks if p not in gingiva_peaks])
+        self.peaks = np.array([p for p in self.peaks if p.index not in gingiva_peaks])
 
     def _segment_teeth(self):
-        self.seg = CurvatureBasedSeg(self.mesh, self.orienter, self.peak_indices)
+        self.seg = CurvatureBasedSeg(self.mesh, self.orienter, self.peaks)
         for reason, peaks in self.seg.discarded_peaks.items():
-            self.discarded_peaks[reason].update(
-                (p.index if hasattr(p, "index") else int(p)) for p in peaks
-            )
+            self.discarded_peaks[reason].update(peaks)
 
         # update peak indices after segmentation, spilled peaks are removed
         self.peaks = self.seg.valid_peaks
@@ -232,14 +243,14 @@ class LandmarkRecognizer:
         discarded_peaks.extend(self.seg.discarded_peaks_all)
         discarded_peaks.extend(self.cutting_plane_intersect_vertices)
 
-        self._harmonic_seg = HarmonicBasedSeg(
+        self.harmonic_seg = HarmonicBasedSeg(
             self.mesh,
             teeth=self.seg.teeth,
             discarded_peaks=discarded_peaks,
             dental_quadratic = self.seg.quadratic
         )
 
-        return self._harmonic_seg.harmonic_field
+        return self.harmonic_seg.harmonic_field
 
 
 if __name__ == '__main__':

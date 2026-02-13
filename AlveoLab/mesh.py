@@ -12,7 +12,7 @@ class Mesh:
 
     # ---- alternative constructors ----
     @classmethod
-    def from_file(cls, file_path):
+    def from_file(cls, file_path: object) -> object:
         """
         Construct from a mesh file path.
         Any load_kwargs are passed to trimesh.load_mesh.

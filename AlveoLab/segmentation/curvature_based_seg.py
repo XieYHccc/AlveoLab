@@ -196,19 +196,21 @@ def spillage_threshold(costs, tri2tri_mask):
 
 class CurvatureBasedSeg:
     SPREAD_COST_CAP = 5
-    MAX_PEAK_DISTANCE = 10.5
+    MAX_PEAK_DISTANCE = 9
     MAX_TOOTH_WIDTH = 13
     MIN_TOOTH_AREA = 12
     MAX_TOOTH_HEIGHT = 10
 
-    def __init__(self, mesh, orienter, peaks_idx, max_cost="auto"):
+    def __init__(self, mesh, orienter, peaks, max_cost="auto"):
         self.mesh = mesh
         self.orienter = orienter
-        self._peak_indices = peaks_idx
+        self.peaks = peaks
+        # self._peak_indices = peaks_idx
 
         self.peak_masks = {}  # peak_id : triangle_mask
         self.peak_costs = {}  # peak_id : accumulative cost to each triangle
         self.teeth = []
+        self.overlapping_area_groups = []
 
         self.discarded_peaks = collections.defaultdict(set)
         self.discarded_overlap_groups = collections.defaultdict(list)  # peaks that are considered as rugae
@@ -338,7 +340,8 @@ class CurvatureBasedSeg:
         self._build_teeth()
 
     def _build_peaks(self):
-        self.peaks = np.array([Peak(self.mesh.vertices[idx], idx) for idx in self._peak_indices])
+        #self.peaks = np.array([Peak(self.mesh.vertices[idx], idx) for idx in self._peak_indices])
+        self.peaks = np.array(self.peaks)
         for peak in self.peaks:
             peak.occlusal = self.orienter.occlusal
 
@@ -372,111 +375,6 @@ class CurvatureBasedSeg:
             "slender": slender,
             "n_faces": int(faces.size),
         }
-
-    def _debug_plot_region_2d(
-            self,
-            mask,
-            side_axis,
-            title="region debug 2D",
-            sample_mesh_faces=30000,
-            sample_mask_faces=30000,
-            point_size_mesh=1,
-            point_size_mask=3,
-    ):
-        """
-        2D 可视化：
-        - subplot1: right-forward 平面（俯视）看横向扩张/串牙
-        - subplot2: side-occlusal 平面（侧视）看下穿（occlusal 方向）
-        side_axis 会画成箭头（在各自平面里的投影）
-        """
-        import matplotlib.pyplot as plt
-
-        faces_all = np.arange(self.mesh.faces.shape[0])
-        faces_in = np.where(mask)[0]
-        if faces_in.size == 0:
-            print("[debug_plot_region_2d] empty mask")
-            return
-
-        # 取 face centers
-        ctr_all = self.mesh.triangles_center
-        ctr_in = ctr_all[faces_in]
-
-        # 下采样避免卡
-        if faces_all.size > sample_mesh_faces:
-            idx = np.random.choice(faces_all, size=sample_mesh_faces, replace=False)
-            ctr_all_s = ctr_all[idx]
-        else:
-            ctr_all_s = ctr_all
-
-        if faces_in.size > sample_mask_faces:
-            idx = np.random.choice(faces_in, size=sample_mask_faces, replace=False)
-            ctr_in_s = ctr_all[idx]
-        else:
-            ctr_in_s = ctr_in
-
-        # 投影轴（都归一化）
-        r = self.orienter.right / (np.linalg.norm(self.orienter.right) + 1e-12)
-        f = self.orienter.forward / (np.linalg.norm(self.orienter.forward) + 1e-12)
-        o = self.orienter.occlusal / (np.linalg.norm(self.orienter.occlusal) + 1e-12)
-        s = np.asarray(side_axis, float)
-        s = s / (np.linalg.norm(s) + 1e-12)
-
-        # region 中心
-        c = ctr_in.mean(axis=0)
-
-        # --- subplot1: right-forward (俯视) ---
-        x_all = ctr_all_s @ r
-        y_all = ctr_all_s @ f
-        x_in = ctr_in_s @ r
-        y_in = ctr_in_s @ f
-
-        # side_axis 在俯视平面上的投影（r,f 分量）
-        sx1 = float(s @ r)
-        sy1 = float(s @ f)
-
-        # --- subplot2: side-occlusal (侧视) ---
-        u_all = ctr_all_s @ s
-        v_all = ctr_all_s @ o
-        u_in = ctr_in_s @ s
-        v_in = ctr_in_s @ o
-
-        # 画图
-        fig, axes = plt.subplots(1, 2, figsize=(12, 5))
-        fig.suptitle(title)
-
-        ax = axes[0]
-        ax.scatter(x_all, y_all, s=point_size_mesh, alpha=0.15)
-        ax.scatter(x_in, y_in, s=point_size_mask, alpha=0.8)
-        ax.set_xlabel("right")
-        ax.set_ylabel("forward")
-        ax.set_title("Top view (right-forward)")
-
-        # 在 region 中心处画 side_axis 箭头（投影）
-        cx1 = float(c @ r)
-        cy1 = float(c @ f)
-        L1 = max(np.std(x_in) + np.std(y_in), 1e-6) * 0.8
-        ax.arrow(cx1, cy1, sx1 * L1, sy1 * L1, head_width=0.02 * L1, length_includes_head=True)
-        ax.text(cx1, cy1, " side_axis", fontsize=9)
-
-        ax.set_aspect("equal", adjustable="box")
-
-        ax = axes[1]
-        ax.scatter(u_all, v_all, s=point_size_mesh, alpha=0.15)
-        ax.scatter(u_in, v_in, s=point_size_mask, alpha=0.8)
-        ax.set_xlabel("side_axis")
-        ax.set_ylabel("occlusal")
-        ax.set_title("Side view (side-occlusal)")
-
-        # 在侧视图里，side_axis 是横轴方向，所以箭头就是 +u
-        cu = float(c @ s)
-        cv = float(c @ o)
-        L2 = max(np.std(u_in) + np.std(v_in), 1e-6) * 0.8
-        ax.arrow(cu, cv, 1.0 * L2, 0.0, head_width=0.02 * L2, length_includes_head=True)
-        ax.text(cu, cv, " side_axis", fontsize=9)
-
-        ax.set_aspect("equal", adjustable="box")
-        plt.tight_layout()
-        plt.show()
 
     def _two_sided_with_separation(self, faces, side_axis, t=0.35, min_ratio=0.06, sep_ratio=0.25):
         n = self.mesh.face_normals[faces]
@@ -517,15 +415,15 @@ class CurvatureBasedSeg:
         area = float(self.mesh.area_faces[faces].sum())
         # if area < min_area:
         #     return False, "too_small"
-        #
-        # ctr = self.mesh.triangles_center[faces]
-        # pr = ctr @ self.orienter.right
-        # pf = ctr @ self.orienter.forward
-        #
-        # width = float(max(pr.max() - pr.min(), pf.max() - pf.min()))
-        # slender = float(width / (np.sqrt(area) + 1e-9))
-        # if slender > max_slender:
-        #     return False, "too_slender"
+
+        ctr = self.mesh.triangles_center[faces]
+        pr = ctr @ self.orienter.right
+        pf = ctr @ self.orienter.forward
+
+        width = float(max(pr.max() - pr.min(), pf.max() - pf.min()))
+        slender = float(width / (np.sqrt(area) + 1e-9))
+        if slender > max_slender:
+            return False, "too_slender"
 
         # --- 几何硬过滤 ---
         drop = (omin_ref - geo_stats["omin"])  # drop>0 表示向下走了
@@ -620,7 +518,7 @@ class CurvatureBasedSeg:
         # 在 cap 内的可达区域
         valid = np.isfinite(costs) & (costs > 0) & (costs < T_cap)
         idx = np.where(valid)[0]
-        assert idx.size > 50
+        # assert idx.size > 50
 
         c_sorted = np.sort(costs[idx])
         # 用分位数生成候选阈值（更均匀覆盖 cost 轴）
@@ -644,24 +542,10 @@ class CurvatureBasedSeg:
             mask = (costs < T)
             geo_stats = self._region_geom_stats(mask)
 
-            # # --- 几何硬过滤 ---
-            # if geo_stats["area"] < A_min:
-            #     continue
-            # if geo_stats["width"] > MAX_WIDTH:
-            #     continue
-            # if geo_stats["height"] > MAX_HEIGHT:
-            #     continue
-            # if geo_stats["slender"] > MAX_SLENDER:
-            #     continue
-            # if omin_ref is not None:
-            #     drop = (omin_ref - geo_stats["omin"])  # drop>0 表示向下走了
-            #     if drop > MAX_DROP:
-            #         continue
-            # else:
-            #     drop = 0.0
-
             # ---几何形态学分析过滤---
             result, reason = self._is_tooth_like_region(mask, geo_stats, min_area=20, max_slender=MAX_SLENDER, omin_ref=omin_ref)
+            # if reason == "two_sided_normals":
+            #     return None, reason
             if not result:
                 continue
 
@@ -910,57 +794,6 @@ class CurvatureBasedSeg:
         self.peak_costs[peak] = accumulative_cost
         self.peak_masks[peak] = is_shortest
 
-    # def _remove_peaks_on_rugae(self):
-    #     """
-    #     Any tooth should have both a lingual and a buccal side, or for very
-    #     slanted teeth, at least a significant variance. The groups on the rugae
-    #     will all face only palatally so will be rejected by this rule.
-    #     """
-    #     # 1. fit a quadratic curve to all spread regions
-    #     all_region_mask = np.zeros_like(self.peak_masks[self.valid_peaks[0]], dtype=bool)
-    #
-    #     for p in self.valid_peaks:
-    #         all_region_mask |= self.peak_masks[p]
-    #     triangle_centers = self.mesh.triangles_center[all_region_mask]
-    #     x, y = (np.dot((triangle_centers - self.orienter.center), e)
-    #             for e in (self.orienter.right, self.orienter.forward))
-    #
-    #     # prioritise the more occlusal points
-    #     weights = np.dot(triangle_centers, self.orienter.occlusal)
-    #     weights -= np.min(weights)
-    #     weights = weights ** 5
-    #
-    #     poly = np.polynomial.Polynomial.fit(x, y, 2, w=weights)
-    #     deriv = poly.deriv()
-    #
-    #     # 2. check each group's region
-    #     groups_to_remove = []
-    #     for group, mask in self._group_region_masks.items():
-    #         center = self.mesh.triangles_center[mask].mean(axis=0)
-    #         deriv_at_peak = deriv((center - self.orienter.center) @ self.orienter.right)
-    #         # tangent in right–forward plane
-    #         tangent = geom.normalize_vector(
-    #             deriv_at_peak * self.orienter.forward + self.orienter.right
-    #         )
-    #         # normal (approx lingual) direction
-    #         approx_lingual_dir = geom.normalize_vector(np.cross(tangent, self.orienter.occlusal))
-    #         region_faces = np.where(mask)[0]
-    #         region_normals = self.mesh.face_normals[region_faces]
-    #         dot = np.dot(region_normals, approx_lingual_dir)
-    #         num_buccal_face = dot[dot < -0.7].shape[0]
-    #         num_lingual_face = dot[dot > 0.7].shape[0]
-    #         buccal_ratio = num_buccal_face / region_faces.shape[0]
-    #         lingual_ratio = num_lingual_face / region_faces.shape[0]
-    #         if buccal_ratio < 0.05 or (1 - lingual_ratio - buccal_ratio) > 0.9:
-    #             self.discarded_overlap_groups[group] = mask
-    #             groups_to_remove.append(group)
-    #     for group in groups_to_remove:
-    #         self._group_region_masks.pop(group)
-    #
-    #     # flatten peaks
-    #     peaks_to_remove = set().union(*groups_to_remove)
-    #     self.discarded_peaks['Rugae Peaks'] = peaks_to_remove
-
     def _predict_spillage_thresholds(self):
         self.spill_thresholds = {}
         self.touches_edge_thresholds = {}
@@ -1014,6 +847,7 @@ class CurvatureBasedSeg:
             self.overlapping_area_args.append(group_peaks)
             area_group = OverlappingAreaGroup(group_peaks, mask, self.mesh, self.orienter, self.quadratic)
 
+            valid = False
             if area_group.width > self.MAX_TOOTH_WIDTH:
                 # Occasionally you get very long stretches of gum just beneath
                 # the incisors.
@@ -1024,13 +858,20 @@ class CurvatureBasedSeg:
                 # in at least two axes.
                 self.discarded_overlap_groups["One Axis Dominate"].append(area_group)
                 # self.overlapping_area_groups.append(area_group)
-            elif area_group.is_one_sided:
+            elif area_group.is_one_sided or \
+                (geom.inner_product(area_group.buccal, self.orienter.forward) > 0.5 and not self._two_sided_with_separation(np.where(mask)[0], area_group.buccal)):
                 # To be a cusp of a tooth the area should have both lingual
                 # facing and buccal facing parts.
                 self.discarded_overlap_groups["Only on One Side"].append(area_group)
+
                 # self.overlapping_area_groups.append(area_group)
             else:
                 self.overlapping_area_groups.append(area_group)
+                valid = True
+
+            if not valid:
+                for peak in group_peaks:
+                    self.discarded_peaks["In Invalid Group"].add(peak)
 
     def _build_quadratic(self):
         """Build the quadratic (approximation of the jaw line) fitting to the point of each peak
@@ -1039,14 +880,14 @@ class CurvatureBasedSeg:
         `self.peak_points` to reflect the reordering.
         """
         #peak_points_unspilled = np.array(self.mesh.vertices[self.valid_peaks])
-        peak_points_unspilled = np.array([peak.point for peak in self.peaks if not peak.spilled])
+        peak_points_unspilled = np.array([peak.point for peak in self.valid_peaks])
 
         assert len(peak_points_unspilled) >= 3, "Not enough valid peaks to build quadratic"
         self.quadratic = Quadratic3D(peak_points_unspilled, self.orienter)
 
         # This just tests "how tall is the quadratic?".
         ys = self.quadratic.quadratic_2d.points[:, 1]
-        assert self.quadratic.quadratic_2d.height > 1.0 * ys.std()
+        # assert self.quadratic.quadratic_2d.height > 1.0 * ys.std()
         """Least squares quadratic is a poor approximation of the jaw line. This
         typically happens if there are raised areas in the centre-rear of the
         model. Other than manually removing these areas, there is nothing that
