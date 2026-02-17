@@ -35,7 +35,55 @@ class LandmarkRecognizerVisualization:
         # plot settings
         self.mesh_plot_attribute = ''
         self.mesh_plot_attribute_is_rgb = False
-        self.cmap = ''
+        self.cmap = 'viridis'
+
+    def plot_polyline(self, pts, color="yellow", line_width=4):
+        """pts: (N,3) numpy array"""
+        pts = np.asarray(pts, dtype=float)
+        if pts.shape[0] < 2:
+            return
+        n = pts.shape[0]
+        lines = np.hstack([[n], np.arange(n)]).astype(np.int64)
+        poly = pv.PolyData(pts)
+        poly.lines = lines
+        self.plotter.add_mesh(poly, color=color, line_width=line_width)
+
+    def plot_harmonic_field(self):
+        hf = self.lr.harmonic_filed
+
+        print(hf.min(), hf.max())
+        lower, upper = np.percentile(hf, [5, 95])
+        # 将离群值clamp到这个范围
+        hf_clamped = np.clip(hf, lower, upper)
+        print(hf_clamped.min(), hf_clamped.max())
+
+        faces_pv = np.hstack([np.full((self.lr.harmonic_seg.dental_mesh.faces.shape[0], 1), 3), self.lr.harmonic_seg.dental_mesh.faces]).flatten()
+        self.pv_mesh = pv.PolyData(self.lr.harmonic_seg.dental_mesh.vertices, faces_pv)
+
+        self.pv_mesh.point_data["harmonic_filed"] = hf_clamped
+
+        self.mesh_plot_attribute = 'harmonic_filed'
+        self.mesh_plot_attribute_is_rgb = False
+
+        vertices = self.lr.harmonic_seg.dental_mesh.vertices
+        for peak_idx in self.lr.harmonic_seg.odd_teeth_peaks:
+            self.plot_sphere_at_point(vertices[peak_idx], color='red')
+        for peak_idx in self.lr.harmonic_seg.even_teeth_peaks:
+            self.plot_sphere_at_point(vertices[peak_idx], color='blue')
+        for idx in self.lr.harmonic_seg.non_tooth_point_indexes:
+            self.plot_sphere_at_point(vertices[idx], color='green')
+
+        # for poly in self.lr.harmonic_seg.best_iso_line.polylines:
+        #     self.plot_polyline(poly, color="yellow", line_width=5)
+        # self.plot_polyline(self.lr.harmonic_seg.best_iso_line.polylines[2], color="yellow", line_width=5)
+
+        for r in self.lr.harmonic_seg.tooth_boundaries:
+            if r.best is None:
+                print("没边界")
+                continue
+            self.plot_polyline(r.best.poly3d, color="white", line_width=5)
+        print(len(self.lr.harmonic_seg.tooth_boundaries))
+
 
     def plot_height_threshold_plane(self):
         heights = np.inner(self.mesh.vertices, self.orienter.occlusal)  # (N,)
@@ -461,14 +509,15 @@ if __name__ == '__main__':
     # labels1 = load_labels('../data/labeld_5year_betterv_objs/0580_5yr_Maxillary_export.json')
 
     # mesh2 = Mesh.from_file('../data/models5y/0709_5 YR_Maxillary_export.stl')
-    mesh2 = Mesh.from_file('../data/models5y/0916_5 YR_Mandibular_export.stl')
+    mesh2 = Mesh.from_file('../data/labeld_5year_betterv_objs/0674_5 YR_Maxillary_export.obj')
     # mesh2 = Mesh.from_file('../data/models5y/0800_5 year_Maxillary_export.stl')
 
-    landmark_recognizer = LandmarkRecognizer(mesh2, 'L')
+    landmark_recognizer = LandmarkRecognizer(mesh2, 'U')
     #
     # for peak in landmark_recognizer.seg.peaks:
     #     viz = LandmarkRecognizerVisualization(landmark_recognizer)
     #     viz.plot_valid_peaks("blue")
+
     #     viz.plot_discarded_peaks("Spilled", color='red')
     #     color = (1, 0, 0) if peak.spilled else (0, 1, 0)
     #     viz.plot_peak_masks(peak, color=color)
@@ -479,11 +528,11 @@ if __name__ == '__main__':
     # viz.plot_teeth()
     # viz.plot_discarded_overlapping_areas()
     # viz.add_mesh_with_labels(mesh1, labels1)
-    viz.plot_valid_peaks("black")
+    # viz.plot_valid_peaks("green")
     # viz.plot_discarded_peaks("Spilled", color='red')
-    viz.plot_discarded_peaks("All", color='black')
+    # viz.plot_discarded_peaks("All", color='black')
     # viz.plot_discarded_peaks("Gingiva Peaks", color='green')
-    # viz.plot_discarded_peaks("No candidate passed", color='red')
+    # viz.plot_discarded_peaks("No candidate passed", color='yellow')
     # viz.plot_edge_based_curvature()
     # viz.plot_teeth_obbs()
     # viz.plot_orientation_axes()
@@ -493,7 +542,7 @@ if __name__ == '__main__':
     # viz.plot_horizon_convex_hull()
     # viz.plot_horizon_bounding_box()
     # viz.plot_dental_quadratic()
-    viz.plot_height_threshold_plane()
+    # viz.plot_height_threshold_plane()
     # viz.plot_all_valid_peak_masks()
     # viz.plot_all_overlapping_group_masks()
     # viz.plot_mesh()
@@ -503,13 +552,14 @@ if __name__ == '__main__':
     #     ], bcolor=None, border=False, face=pv.Sphere(), loc="upper center", size=(0.1, 0.1))
 
 
-    # viz.plot_peak_accumulative_cost_no_mask(landmark_recognizer.seg.peaks[33])
+    # viz.plot_peak_accumulative_cost_no_mask(landmark_recognizer.seg.peaks[19])
     # print(landmark_recognizer.seg.peak_max_costs[landmark_recognizer.seg.peaks[19]])
     # landmark_recognizer.seg.parse_spread(landmark_recognizer.seg.peaks[32], 2)
     # viz.plot_peak_masks(landmark_recognizer.seg.peaks[32], color=(0, 1, 0))
-    for idx, peak in enumerate(landmark_recognizer.seg.peaks):
-        if peak.spilled:
-            print(idx)
+    # for idx, peak in enumerate(landmark_recognizer.seg.peaks):
+    #     if peak.spilled:
+    #         print(idx)
+    viz.plot_harmonic_field()
     viz.plot_mesh()
     # landmark_recognizer.seg.parse_spread()
     # viz.plot_all_peaks_accumulative_cost_no_mask()

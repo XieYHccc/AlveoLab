@@ -321,6 +321,7 @@ class CurvatureBasedSeg:
         self._spread_from_peaks()
         self._predict_spillage_thresholds()
 
+        # self.try_with_max_cost(0.9)
         # self.test_max_costs()
         # self.pick_optimal_max_cost()
 
@@ -405,7 +406,7 @@ class CurvatureBasedSeg:
     def _is_tooth_like_region(self, mask, geo_stats, min_area, max_slender, omin_ref):
         MAX_WIDTH = 11.5
         MAX_HEIGHT = 10.0
-        MAX_DROP = 4.0
+        MAX_DROP = 5.0
         MAX_SLENDER = 1.7
         w_width = 0.2
         w_drop = 0.3
@@ -446,6 +447,17 @@ class CurvatureBasedSeg:
         return True, None
 
 
+    @LazyAttribute
+    def global_scale(self):
+        curv = self.mesh.tri2tri_edge_curvatures
+        x = -curv[np.isfinite(curv)]  # 负曲率强度候选（把符号翻成正）
+        if x.size == 0:
+            return 1.0
+        else:
+            return np.quantile(x, 0.9)  # 或 0.95
+
+
+
     def _boundary_crease_ratio(self, inside_mask, tau=0.0, use_magnitude=False):
         """
         inside_mask: bool, shape (n_face,)
@@ -459,6 +471,7 @@ class CurvatureBasedSeg:
         """
         nb = self.mesh.face_neighbors  # (n_face, 3), -1 表示无邻居（开边）
         curv = self.mesh.tri2tri_edge_curvatures  # (n_face, 3), 你说的 face-to-face 边曲率
+        curv_min = np.min(curv)
 
         inside = inside_mask
         # 只在 inside 的 face 上看 3 条邻边
@@ -485,23 +498,33 @@ class CurvatureBasedSeg:
         bcurv = bcurv[np.isfinite(bcurv)]
         assert bcurv.size > 0
 
-        # 负曲率边计数：curv < -tau
-        crease = bcurv < (-tau)
-        n_boundary = bcurv.size
-        n_crease = int(crease.sum())
+        # # 负曲率边计数：curv < -tau
+        # crease = bcurv < (-tau)
+        # n_boundary = bcurv.size
+        # n_crease = int(crease.sum())
+        #
+        # crease_ratio = float(n_crease / (n_boundary + 1e-12))
+        #
+        # if not use_magnitude:
+        #     conf = crease_ratio
+        #     mean_neg_mag = 0.0
+        # else:
+        #     # 负曲率强度：mean(-curv) over negative edges
+        #     if n_crease > 0:
+        #         mean_neg_mag = float((-bcurv[crease]).mean())
+        #     else:
+        #         mean_neg_mag = 0.0
+        #     conf = float(crease_ratio * mean_neg_mag)
 
-        crease_ratio = float(n_crease / (n_boundary + 1e-12))
+        neg = (-bcurv - tau)  # 把阈值扣掉，>0 才算沟，越大越沟
+        neg = np.maximum(neg, 0.0)
 
-        if not use_magnitude:
-            conf = crease_ratio
-            mean_neg_mag = 0.0
-        else:
-            # 负曲率强度：mean(-curv) over negative edges
-            if n_crease > 0:
-                mean_neg_mag = float((-bcurv[crease]).mean())
-            else:
-                mean_neg_mag = 0.0
-            conf = float(crease_ratio * mean_neg_mag)
+        # 归一化并饱和
+        edge_score = 1.0 - np.exp(-neg / (self.global_scale + 1e-12))  # [0,1)
+
+        conf = float(edge_score.mean())  # 直接就是整体“沟置信度”
+        # 如果你还想保留 ratio，也可以同时返回：
+        crease_ratio = float((neg > 0).mean())
 
         return crease_ratio, conf
 
@@ -576,7 +599,7 @@ class CurvatureBasedSeg:
             return None, "Spilled"
 
         # 用边界负曲率占比选阈值
-        T_best, reason= self._pick_T_by_boundary_conf(peak=peak, T_cap=T_cap, q_num=70, tau=1,use_magnitude=True)
+        T_best, reason= self._pick_T_by_boundary_conf(peak=peak, T_cap=T_cap, q_num=70, tau=0.5,use_magnitude=True)
         return T_best, reason
 
     def _estimate_peak_threshold(self, peak, k=60, jump_area_ratio=5.0, min_jump_area=1.0, gap_ratio=3.0, min_gap_abs=0.05, min_cap=0.8, eps=1e-9):

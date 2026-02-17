@@ -2,8 +2,7 @@ import trimesh as tm
 import numpy as np
 
 from AlveoLab.utils import LazyAttribute
-from AlveoLab.trimesh_utils import get_edge_based_curvature, get_face_face_adjacency
-
+from AlveoLab.trimesh_utils import get_edge_based_curvature, get_face_face_adjacency, discrete_mean_curvature_measure
 class Mesh:
     def __init__(self, trimesh_obj: tm.Trimesh):
         if not isinstance(trimesh_obj, tm.Trimesh):
@@ -56,5 +55,9 @@ class Mesh:
         fi, k = np.nonzero(valid)
         disp[fi, k] = centers[neigh[fi, k]] - centers[fi]
         return disp
+
+    @LazyAttribute
+    def vertex_mean_curvature(self):
+        return discrete_mean_curvature_measure(self._mesh)
 
 

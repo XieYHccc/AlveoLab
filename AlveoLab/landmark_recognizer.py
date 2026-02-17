@@ -87,7 +87,7 @@ class LandmarkRecognizer:
 
     @LazyAttribute
     def cutting_plane_intersect_vertices(self):
-        cutting_plane_offset = self.height_threshold - 2 #TODO: adaptive offset
+        cutting_plane_offset = self.height_threshold- 2 #TODO: adaptive offset
         vertex_heights = inner_product(self.mesh.vertices, self.orienter.occlusal)
 
         return  np.where((vertex_heights - cutting_plane_offset < 0.05) &
@@ -123,6 +123,7 @@ class LandmarkRecognizer:
 
     def _preprocess_mesh(self):
         cutting_plane_offset = self.height_threshold - 4 #TODO: adaptive offset
+
         faces_height = np.inner(self.mesh.triangles_center, self.orienter.occlusal)
 
         submeshes = self.mesh.submesh([faces_height > cutting_plane_offset], append=True).split(only_watertight=False)
@@ -238,20 +239,23 @@ class LandmarkRecognizer:
 
     @LazyAttribute
     def harmonic_filed(self):
-        discarded_peaks = []
-        discarded_peaks.extend(set.union(*self.discarded_peaks.values()))
-        discarded_peaks.extend(self.seg.discarded_peaks_all)
-        discarded_peaks.extend(self.cutting_plane_intersect_vertices)
+        non_tooth_point_indexes = []
+        # for peaks in self.discarded_peaks.values():
+        #     non_tooth_point_indexes.extend([peak.index for peak in peaks])
+
+        # non_tooth_point_indexes.extend(set.union(*self.discarded_peaks.values()))
+        # discarded_peaks.extend(self.seg.discarded_peaks_all)
+        non_tooth_point_indexes.extend(self.cutting_plane_intersect_vertices)
 
         self.harmonic_seg = HarmonicBasedSeg(
             self.mesh,
             teeth=self.seg.teeth,
-            discarded_peaks=discarded_peaks,
-            dental_quadratic = self.seg.quadratic
+            non_tooth_point_indexes=non_tooth_point_indexes,
+            dental_quadratic = self.seg.quadratic,
+            orienter=self.orienter,
         )
 
         return self.harmonic_seg.harmonic_field
-
 
 if __name__ == '__main__':
     mesh: tm.Trimesh = tm.load_mesh('../data/1JMandibular_export.stl')
