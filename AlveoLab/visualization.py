@@ -70,7 +70,7 @@ class LandmarkRecognizerVisualization:
             self.plot_sphere_at_point(vertices[peak_idx], color='red')
         for peak_idx in self.lr.harmonic_seg.even_teeth_peaks:
             self.plot_sphere_at_point(vertices[peak_idx], color='blue')
-        for idx in self.lr.harmonic_seg.non_tooth_point_indexes:
+        for idx in self.lr.harmonic_seg.gingiva_vertices_indexes:
             self.plot_sphere_at_point(vertices[idx], color='green')
 
         # for poly in self.lr.harmonic_seg.best_iso_line.polylines:
@@ -83,7 +83,6 @@ class LandmarkRecognizerVisualization:
                 continue
             self.plot_polyline(r.best.poly3d, color="white", line_width=5)
         print(len(self.lr.harmonic_seg.tooth_boundaries))
-
 
     def plot_height_threshold_plane(self):
         heights = np.inner(self.mesh.vertices, self.orienter.occlusal)  # (N,)
@@ -498,6 +497,273 @@ class LandmarkRecognizerVisualization:
             for p in peaks:
                 self.plot_sphere_at_point(p.point, color="black", radius=0.45, opacity=1.0)
 
+    def plot_all_candidates_energy_accumulated_heatmap(
+            self,
+            dbg: dict,
+            use_norm: bool = True,  # True: candidate_energy_norm
+            close_tol: float = 1e-3,
+            min_loop_points: int = 20,
+            ring_band_mm: float = 0.8,  # 距离候选平面多近的顶点算“被该候选覆盖”
+            weight_mode: str = "inverse",  # "direct" or "inverse"
+            aggregate: str = "mean",  # "sum" / "mean" / "max"
+            cmap: str = "jet_r",
+            clip_percentile=(2, 98),
+            show_scalar_bar=True,
+            title: str = "All-candidate energy heatmap",
+    ):
+        """
+        把所有candidate能量都投影到mesh上：
+        - 对每个candidate z_i，找到距离该平面 <= ring_band_mm 的顶点集合 band_i
+        - 将该candidate能量 E_i 累加到 band_i
+        - 最后聚合(sum/mean/max)并转成 face-level 画热图
+        """
+
+        # ---------- 读取candidate ----------
+        if "candidate_z" not in dbg:
+            raise ValueError("dbg 缺少 candidate_z")
+        z_cand = np.asarray(dbg["candidate_z"], dtype=float).reshape(-1)
+
+        if z_cand.size == 0:
+            raise ValueError("candidate_z 为空")
+
+        e_key = "candidate_energy_norm" if use_norm else "candidate_energy_raw"
+        if e_key not in dbg:
+            raise ValueError(f"dbg 缺少 {e_key}")
+        e_cand = np.asarray(dbg[e_key], dtype=float).reshape(-1)
+        if e_cand.shape[0] != z_cand.shape[0]:
+            raise ValueError("candidate_z 与 energy 长度不一致")
+
+        # ---------- mesh & height ----------
+        V = np.asarray(self.mesh.vertices, dtype=float)  # (N,3)
+        F = np.asarray(self.mesh.faces, dtype=np.int64)  # (M,3)
+        n = np.asarray(self.orienter.occlusal, dtype=float)
+        n /= (np.linalg.norm(n) + 1e-12)
+        h_v = V @ n  # 每个顶点沿occlusal高度
+
+        N = V.shape[0]
+
+        # 每个候选能量转为“热度权重”
+        # direct: 能量越大越热；inverse: 能量越小越热（更像“好平面区域”）
+        if weight_mode == "direct":
+            w_cand = e_cand.copy()
+        elif weight_mode == "inverse":
+            # 防止除0：用1-e（norm）或用线性反转
+            if use_norm:
+                w_cand = 1.0 - np.clip(e_cand, 0.0, 1.0)
+            else:
+                # raw时做鲁棒归一化再反转
+                finite = np.isfinite(e_cand)
+                if finite.any():
+                    lo, hi = np.percentile(e_cand[finite], [5, 95])
+                    if hi - lo > 1e-12:
+                        en = np.clip((e_cand - lo) / (hi - lo), 0.0, 1.0)
+                    else:
+                        en = np.zeros_like(e_cand)
+                else:
+                    en = np.zeros_like(e_cand)
+                w_cand = 1.0 - en
+        else:
+            raise ValueError("weight_mode 只能是 'direct' 或 'inverse'")
+
+        # ---------- 累加到顶点 ----------
+        acc = np.zeros(N, dtype=float)
+        cnt = np.zeros(N, dtype=float)
+        mx = np.full(N, -np.inf, dtype=float)
+
+        for z, w in zip(z_cand, w_cand):
+            band_mask = np.abs(h_v - float(z)) <= float(ring_band_mm)  # 该候选平面带状邻域
+            if not np.any(band_mask):
+                continue
+
+            if aggregate in ("sum", "mean"):
+                acc[band_mask] += float(w)
+                cnt[band_mask] += 1.0
+            elif aggregate == "max":
+                mx[band_mask] = np.maximum(mx[band_mask], float(w))
+            else:
+                raise ValueError("aggregate 只能是 'sum'/'mean'/'max'")
+
+        if aggregate == "sum":
+            vertex_heat = acc
+        elif aggregate == "mean":
+            vertex_heat = np.divide(acc, cnt, out=np.zeros_like(acc), where=cnt > 0)
+        else:  # max
+            vertex_heat = np.where(np.isfinite(mx), mx, 0.0)
+
+        # ---------- vertex -> face ----------
+        face_heat = vertex_heat[F].mean(axis=1)
+
+        finite = np.isfinite(face_heat)
+        if not finite.any():
+            raise RuntimeError("face_heat 全是非有限值，检查candidate与ring_band_mm")
+
+        vmin, vmax = np.percentile(face_heat[finite], clip_percentile)
+        vmin, vmax = float(vmin), float(vmax)
+        if np.isclose(vmin, vmax):
+            vmax = vmin + 1e-6
+
+        face_heat = np.clip(face_heat, vmin, vmax)
+
+        # ---------- 上图 ----------
+        key = "all_candidates_energy_heat"
+        self.pv_mesh.cell_data[key] = face_heat
+        self.plotter.add_mesh(
+            self.pv_mesh,
+            scalars=key,
+            cmap=cmap,
+            clim=(vmin, vmax),
+            opacity=1.0,
+            specular=0.0,
+            ambient=0.2,
+            show_scalar_bar=show_scalar_bar,
+            scalar_bar_args={"title": title} if show_scalar_bar else None,
+        )
+
+    def plot_candidate_loops_colored_by_energy(
+            self,
+            dbg: dict,
+            use_norm: bool = True,  # True: candidate_energy_norm；False: raw
+            only_single_loop: bool = True,  # 论文风格：只画单闭环
+            choose_longest_if_multi: bool = False,  # only_single_loop=False时，多环取最长
+            close_tol: float = 1e-3,
+            min_loop_points: int = 20,
+            cmap: str = "jet_r",
+            line_width: float = 4.0,
+            opacity: float = 1.0,
+            show_scalar_bar: bool = True,
+            scalar_title: str = "Candidate energy",
+            draw_picked_as_sphere: bool = True,
+            picked_sphere_radius: float = 0.8,
+            picked_color: str = "white",
+    ):
+        """
+        画所有candidate对应的截交闭环曲线，颜色由candidate energy决定。
+        """
+        import pyvista as pv
+        import numpy as np
+
+        # ---------- 读 dbg ----------
+        if "candidate_z" not in dbg:
+            raise ValueError("dbg 缺少 candidate_z")
+        z_cand = np.asarray(dbg["candidate_z"], dtype=float).reshape(-1)
+
+        e_key = "candidate_energy_norm" if use_norm else "candidate_energy_raw"
+        if e_key not in dbg:
+            raise ValueError(f"dbg 缺少 {e_key}")
+        e_cand = np.asarray(dbg[e_key], dtype=float).reshape(-1)
+
+        if z_cand.size == 0 or e_cand.size == 0 or z_cand.size != e_cand.size:
+            raise ValueError("candidate_z 与 candidate_energy 长度异常")
+
+        mesh_tm = self.mesh._mesh if hasattr(self.mesh, "_mesh") else self.mesh
+        n = np.asarray(self.orienter.occlusal, dtype=float)
+        n /= (np.linalg.norm(n) + 1e-12)
+
+        # 用全局候选能量范围统一映射颜色
+        finite = np.isfinite(e_cand)
+        if not finite.any():
+            raise RuntimeError("候选能量全是非有限值")
+        emin = float(np.nanmin(e_cand[finite]))
+        emax = float(np.nanmax(e_cand[finite]))
+        if np.isclose(emin, emax):
+            emax = emin + 1e-6
+
+        # ---------- 小工具函数 ----------
+        def _extract_loops(z):
+            sec = mesh_tm.section(plane_origin=n * float(z), plane_normal=n)
+            if sec is None:
+                return []
+            loops = []
+            for pl in sec.discrete:
+                pl = np.asarray(pl, dtype=float)
+                if pl.ndim == 2 and pl.shape[0] >= 3 and pl.shape[1] == 3:
+                    if np.linalg.norm(pl[0] - pl[-1]) <= close_tol and pl.shape[0] >= min_loop_points:
+                        loops.append(pl)
+            return loops
+
+        def _polyline_length(poly):
+            if poly.shape[0] < 2:
+                return 0.0
+            d = np.diff(poly, axis=0)
+            return float(np.linalg.norm(d, axis=1).sum())
+
+        # ---------- 逐候选画曲线 ----------
+        drawn_any = False
+        picked_idx = int(dbg["picked_idx"]) if ("picked_idx" in dbg and dbg["picked_idx"] is not None) else None
+        picked_center = None
+
+        for i, (z, e) in enumerate(zip(z_cand, e_cand)):
+            loops = _extract_loops(z)
+            if len(loops) == 0:
+                continue
+
+            chosen_loops = []
+            if only_single_loop:
+                if len(loops) == 1:
+                    chosen_loops = [loops[0]]
+                else:
+                    continue
+            else:
+                if choose_longest_if_multi and len(loops) > 1:
+                    chosen_loops = [max(loops, key=_polyline_length)]
+                else:
+                    chosen_loops = loops
+
+            for lp in chosen_loops:
+                pts = np.asarray(lp, dtype=float)
+                npts = pts.shape[0]
+                if npts < 2:
+                    continue
+
+                poly = pv.PolyData(pts)
+                lines = np.hstack([[npts], np.arange(npts, dtype=np.int64)])
+                poly.lines = lines
+
+                # 每条曲线所有点赋同一个能量
+                poly.point_data["energy"] = np.full(npts, float(e), dtype=float)
+
+                self.plotter.add_mesh(
+                    poly,
+                    scalars="energy",
+                    cmap=cmap,
+                    clim=(emin, emax),
+                    line_width=line_width,
+                    opacity=opacity,
+                    show_scalar_bar=False,  # 统一最后加一次bar
+                    render_lines_as_tubes=True,
+                )
+                drawn_any = True
+
+                if picked_idx is not None and i == picked_idx:
+                    picked_center = pts.mean(axis=0)
+
+        if not drawn_any:
+            raise RuntimeError("没有画出任何candidate曲线。可尝试放宽 min_loop_points 或 close_tol。")
+
+        # 单独添加一次标尺（避免重复）
+        if show_scalar_bar:
+            dummy = pv.PolyData(np.array([[0.0, 0.0, 0.0], [1.0, 0.0, 0.0]]))
+            dummy.lines = np.array([2, 0, 1])
+            dummy.point_data["energy"] = np.array([emin, emax], dtype=float)
+            self.plotter.add_mesh(
+                dummy,
+                scalars="energy",
+                cmap=cmap,
+                clim=(emin, emax),
+                opacity=0.0,
+                line_width=0.0,
+                show_scalar_bar=True,
+                scalar_bar_args={"title": scalar_title},
+            )
+
+        # 高亮 picked 候选（可选）
+        if draw_picked_as_sphere and picked_center is not None:
+            self.plotter.add_mesh(
+                pv.Sphere(radius=picked_sphere_radius, center=picked_center),
+                color=picked_color,
+                opacity=1.0
+            )
+
 
 if __name__ == '__main__':
     import trimesh as tm
@@ -509,10 +775,10 @@ if __name__ == '__main__':
     # labels1 = load_labels('../data/labeld_5year_betterv_objs/0580_5yr_Maxillary_export.json')
 
     # mesh2 = Mesh.from_file('../data/models5y/0709_5 YR_Maxillary_export.stl')
-    mesh2 = Mesh.from_file('../data/labeld_5year_betterv_objs/0674_5 YR_Maxillary_export.obj')
+    mesh2 = Mesh.from_file('../data/labeld_5year_betterv_objs/0611_5yr_Maxillary_export.obj')
     # mesh2 = Mesh.from_file('../data/models5y/0800_5 year_Maxillary_export.stl')
 
-    landmark_recognizer = LandmarkRecognizer(mesh2, 'U')
+    landmark_recognizer = LandmarkRecognizer(mesh2, 'L')
     #
     # for peak in landmark_recognizer.seg.peaks:
     #     viz = LandmarkRecognizerVisualization(landmark_recognizer)
@@ -560,6 +826,24 @@ if __name__ == '__main__':
     #     if peak.spilled:
     #         print(idx)
     viz.plot_harmonic_field()
+    hf = landmark_recognizer.harmonic_filed
+    # viz.plot_all_candidates_energy_accumulated_heatmap(
+    #     dbg=landmark_recognizer.harmonic_seg.debug,
+    #     use_norm=True,
+    #     weight_mode="inverse",  # 低能=高热
+    #     aggregate="mean",  # 对每个顶点取候选平均贡献
+    #     ring_band_mm=0.8,  # 0.6~1.2可调
+    #     cmap="jet_r",
+    #     title="All candidate planes (low energy = hot)"
+    # )
+    # viz.plot_candidate_loops_colored_by_energy(
+    #     dbg=landmark_recognizer.harmonic_seg.debug,
+    #     use_norm=True,  # 看归一化能量
+    #     only_single_loop=True,  # 论文风格
+    #     cmap="jet_r",
+    #     line_width=5.0,
+    #     scalar_title="Candidate energy (norm)"
+    # )
     viz.plot_mesh()
     # landmark_recognizer.seg.parse_spread()
     # viz.plot_all_peaks_accumulative_cost_no_mask()

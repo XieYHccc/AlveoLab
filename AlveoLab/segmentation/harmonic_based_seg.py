@@ -10,11 +10,12 @@ from AlveoLab.segmentation.isoline_voting import (
     compute_face_grad_magnitudes,
     pick_best_isoloops_per_tooth_dot_scissor,
 )
-from AlveoLab.segmentation.cutting_plane_select import find_optimal_gingiva_plane_trimesh
 from AlveoLab.mesh import Mesh
 
-import numpy as np
-import trimesh as tm
+# from AlveoLab.segmentation.cutting_plane_select import find_optimal_gingiva_plane_trimesh
+# from AlveoLab.segmentation.cutting_plane import find_optimal_gingiva_plane_trimesh
+from AlveoLab.segmentation.cutting import find_optimal_gingiva_plane_trimesh_mean_paperlike
+
 
 def crop_mesh_above_plane_and_remap(
     mesh: tm.Trimesh,
@@ -149,7 +150,7 @@ class HarmonicBasedSeg:
 
         assert len(odd_teeth_peaks) > 1
         assert len(even_teeth_peaks) > 1
-        assert len(self.non_tooth_point_indexes) > 1
+        # assert len(self.non_tooth_point_indexes) > 1
 
         A, b = build_Ab_from_L_and_constraints(
             self.laplacian_matrix,
@@ -165,16 +166,36 @@ class HarmonicBasedSeg:
         self.odd_teeth_peaks = odd_teeth_peaks
 
     def _find_best_cutting_plane(self):
-        z_final, gingiva_ring_vidx, dbg = find_optimal_gingiva_plane_trimesh(
-            mesh=self.dental_mesh,  # trimesh.Trimesh
-            occlusal=self.orienter.occlusal,  # 方向向量
-            right=self.orienter.right,
-            forward=self.orienter.forward,
+        # z_final, gingiva_ring_vidx, dbg = find_optimal_gingiva_plane_trimesh(
+        #     mesh=self.dental_mesh,  # trimesh.Trimesh
+        #     occlusal=self.orienter.occlusal,  # 方向向量
+        #     right=self.orienter.right,
+        #     forward=self.orienter.forward,
+        #     step_mm=0.5,
+        #     top_margin_mm=3.0,
+        #     delta_down_mm=1.2,
+        # )
+
+        # z_final, gingiva_ring_vidx, dbg = find_optimal_gingiva_plane_trimesh(
+        #     mesh_wrap=self.dental_mesh,           # 注意这里传 Mesh 包装对象
+        #     occlusal=self.orienter.occlusal,
+        #     step_mm=0.5,
+        #     top_margin_mm=3.0,
+        #     delta_down_mm=1.5,
+        #     curvature_mode="mean",                # 先跑通可用 mean
+        # )
+
+        z_final, gingiva_ring_vidx, dbg =  find_optimal_gingiva_plane_trimesh_mean_paperlike(
+            mesh_wrap=self.dental_mesh,
+            occlusal=self.orienter.occlusal,
             step_mm=0.5,
             top_margin_mm=3.0,
-            delta_down_mm=1.2,
         )
 
+        print("z_final:", z_final)
+        print("candidate count", dbg["candidate_count"])
+
+        self.debug = dbg
         self.cutting_plane_height = z_final
         self.gingiva_vertices_indexes = gingiva_ring_vidx
 
