@@ -21,6 +21,15 @@ class LandmarkRecognizerVisualization:
         self.plotter = get_dental_plotter()
         self.mesh = landmark_recognizer.mesh
         self.orienter = self.lr.orienter
+        # T = np.array([
+        #     [0.5, -0.8660254, 0, 0],
+        #     [0.8660254, 0.5, 0, -3],
+        #     [0, 0, 1, 0],
+        #     [0, 0, 0, 1]
+        # ])
+        #
+        # self.mesh.apply_transform(T)
+        # self.mesh.apply_transform(self.orienter.to_origin_transform_matrix)
 
         # setup pyvista mesh
         faces_pv = np.hstack([np.full((self.mesh.faces.shape[0], 1), 3), self.mesh.faces]).flatten()
@@ -330,6 +339,93 @@ class LandmarkRecognizerVisualization:
         self.plotter.show()
         plt.show()
 
+    def draw_world_axes_lines(
+            self,
+            length=80,  # 总长度（-L/2 到 +L/2）
+            line_width=8,  # 线宽（像素）
+            opacity=1.0,
+            show_origin_label=False,
+            label_font_size=14,
+            # 新增：箭头参数
+            arrow_scale=0.03,  # 箭头相对length的比例
+            arrow_tip_length=0.95,  # 箭头尖长度比例（相对箭头本身）
+            arrow_tip_radius=0.08,  # 尖半径比例（相对箭头本身）
+            arrow_shaft_radius=0.01  # 杆半径比例（相对箭头本身）
+    ):
+        """
+        在原点画默认世界坐标轴 X/Y/Z（轴线 + 末端箭头）。
+        轴范围：[-L/2, +L/2]，穿过模型。
+        """
+
+        half = float(length) / 2.0
+        O = np.array([0.0, 0.0, 0.0], dtype=float)
+
+        dirs = np.array([
+            [1.0, 0.0, 0.0],  # X
+            [0.0, 1.0, 0.0],  # Y
+            [0.0, 0.0, 1.0],  # Z
+        ], dtype=float)
+
+        # 固定：X红、Y绿、Z蓝
+        colors = [(255, 0, 0), (0, 255, 0), (0, 0, 255)]
+        names = ["X", "Y", "Z"]
+
+        # 箭头大小（世界坐标）
+        arrow_len = float(length) * float(arrow_scale)
+
+        for d, c, name in zip(dirs, colors, names):
+            p0 = O - d * half
+            p1 = O + d * half
+
+            # 轴线：p0 -> p1
+            line = pv.Line(p0, p1)
+            self.plotter.add_mesh(
+                line,
+                color=c,
+                line_width=line_width,
+                opacity=opacity,
+                render_lines_as_tubes=False,  # 不要tube效果
+            )
+
+            # 末端箭头：从 (p1 - d*arrow_len) 指向 p1
+            start = p1 - d * arrow_len
+            arrow = pv.Arrow(
+                start=start,
+                direction=d,
+                tip_length=arrow_tip_length,
+                tip_radius=arrow_len * arrow_tip_radius,
+                shaft_radius=arrow_len * arrow_shaft_radius,
+                scale=arrow_len,  # 箭头整体长度
+            )
+            self.plotter.add_mesh(
+                arrow,
+                color=c,
+                opacity=opacity,
+                smooth_shading=True,
+            )
+
+            # 末端文字
+            self.plotter.add_point_labels(
+                [p1],
+                [name],
+                font_size=label_font_size,
+                text_color=c,
+                point_size=0,
+                shape_opacity=0.0,
+                always_visible=True,
+            )
+
+        if show_origin_label:
+            self.plotter.add_point_labels(
+                [O],
+                ["O"],
+                font_size=label_font_size,
+                text_color="black",
+                point_size=0,
+                shape_opacity=0.0,
+                always_visible=True,
+            )
+
     # for draw two meshes
     def add_mesh(self, trimesh):
         # setup pyvista mesh
@@ -342,7 +438,7 @@ class LandmarkRecognizerVisualization:
 
     def add_mesh_with_labels(self, mesh, labels):
         palette = np.array([
-            [255, 153, 153],  # gingiva
+            [255, 255, 255],  # gingiva
             [153, 76, 0], [153, 153, 0], [76, 153, 0], [0, 153, 153], [0, 0, 153], [153, 0, 153],
             [255, 128, 0], [153, 153, 0], [76, 153, 0], [0, 153, 153], [0, 0, 153], [153, 0, 153],
         ]) / 255
@@ -772,13 +868,13 @@ if __name__ == '__main__':
     # mesh: tm.Trimesh = tm.load_mesh('../data/1JMandibular_export.stl')
     # mesh1: tm.Trimesh = tm.load_mesh('../data/models5y/0609_5 YR_Mandibular_export.stl')
     # mesh: tm.Trimesh = tm.load_mesh('../data/labeld_5year_betterv_objs/0709_5 YR_Mandibular_export.obj')
-    # labels1 = load_labels('../data/labeld_5year_betterv_objs/0580_5yr_Maxillary_export.json')
+    labels1 = load_labels('../data/9028 upper.json', False)
 
     # mesh2 = Mesh.from_file('../data/models5y/0709_5 YR_Maxillary_export.stl')
-    mesh2 = Mesh.from_file('../data/labeld_5year_betterv_objs/0611_5yr_Maxillary_export.obj')
-    # mesh2 = Mesh.from_file('../data/models5y/0800_5 year_Maxillary_export.stl')
+    # mesh2 = Mesh.from_file('../data/labeld_5year_betterv_objs/0715_5YR_Maxillary_export.obj')
+    mesh2 = Mesh.from_file('../data/labeld_5year_betterv_objs/9028 upper.obj')
 
-    landmark_recognizer = LandmarkRecognizer(mesh2, 'L')
+    landmark_recognizer = LandmarkRecognizer(mesh2, 'U')
     #
     # for peak in landmark_recognizer.seg.peaks:
     #     viz = LandmarkRecognizerVisualization(landmark_recognizer)
@@ -793,7 +889,7 @@ if __name__ == '__main__':
     viz = LandmarkRecognizerVisualization(landmark_recognizer)
     # viz.plot_teeth()
     # viz.plot_discarded_overlapping_areas()
-    # viz.add_mesh_with_labels(mesh1, labels1)
+    viz.add_mesh_with_labels(mesh2, labels1)
     # viz.plot_valid_peaks("green")
     # viz.plot_discarded_peaks("Spilled", color='red')
     # viz.plot_discarded_peaks("All", color='black')
@@ -825,8 +921,8 @@ if __name__ == '__main__':
     # for idx, peak in enumerate(landmark_recognizer.seg.peaks):
     #     if peak.spilled:
     #         print(idx)
-    viz.plot_harmonic_field()
-    hf = landmark_recognizer.harmonic_filed
+    # viz.plot_harmonic_field()
+    # hf = landmark_recognizer.harmonic_filed
     # viz.plot_all_candidates_energy_accumulated_heatmap(
     #     dbg=landmark_recognizer.harmonic_seg.debug,
     #     use_norm=True,
@@ -844,7 +940,9 @@ if __name__ == '__main__':
     #     line_width=5.0,
     #     scalar_title="Candidate energy (norm)"
     # )
-    viz.plot_mesh()
+    # viz.draw_world_axes_lines()
+    # viz.plot_mesh()
+
     # landmark_recognizer.seg.parse_spread()
     # viz.plot_all_peaks_accumulative_cost_no_mask()
     viz.show()
