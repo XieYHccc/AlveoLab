@@ -8,6 +8,7 @@ from scipy.spatial import ConvexHull, QhullError
 from AlveoLab.math.geometry import inner_product
 from AlveoLab.utils import get_logger, logging, LazyAttribute
 from AlveoLab.orienter.pca_dental_orienter import PcaOrienter
+from AlveoLab.orienter.obb_dental_orienter import ObbOrienter
 from AlveoLab.trimesh_utils import (get_local_maximum_along_dir, get_local_maximum,
                                     discrete_mean_curvature_measure, smooth_curvature)
 from AlveoLab.segmentation.curvature_based_seg import CurvatureBasedSeg
@@ -119,7 +120,7 @@ class LandmarkRecognizer:
         logger.info(f"[pipeline] all steps finished in {total_elapsed:.3f}s")
 
     def _find_orientation(self):
-        self.orienter = PcaOrienter(self.mesh, self.arch_type)
+        self.orienter = ObbOrienter(self.mesh, self.arch_type)
 
     def _preprocess_mesh(self):
         cutting_plane_offset = self.height_threshold - 4 #TODO: adaptive offset

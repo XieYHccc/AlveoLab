@@ -54,9 +54,13 @@ class PcaOrienter(BaseOrienter):
         """
 
         result = np.eye(4)
-        result[:3, :3] = self.axes.T
-        result[:3, 3] = -self.center
-        return result
+        result[:3, :3] = self.axes
+        print(result)
+        result[:3, 3] = self.center
+        if self.arch_type == "U":
+            result[:3, :2] = -result[:3, :2]
+
+        return np.linalg.inv(result)
 
     def __init__(self, mesh, arch_type):
         super().__init__(mesh, arch_type)  # Initialize common attributes in the base class

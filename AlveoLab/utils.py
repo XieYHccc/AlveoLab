@@ -187,11 +187,12 @@ def load_json(file_path):
     with open(file_path, "r") as st_json:
         return json.load(st_json)
 
-def load_labels(file_path):
+def load_labels(file_path, map = True):
     loaded_json = load_json(file_path)
     labels = np.array(loaded_json['labels']).reshape(-1, 1)
 
     # map primary labels to 0-12
-    labels = map_primary_label_to_flat_label(labels)
+    if map:
+        labels = map_primary_label_to_flat_label(labels)
 
     return labels

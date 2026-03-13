@@ -56,9 +56,13 @@ class ObbOrienter(BaseOrienter):
         """
 
         result = np.eye(4)
-        result[:3, :3] = self.axes.T
-        result[:3, 3] = -self.center
-        return result
+        result[:3, :3] = self.axes
+        print(result)
+        result[:3, 3] = self.center
+        if self.arch_type == "U":
+            result[:3, :2] = -result[:3, :2]
+
+        return np.linalg.inv(result)
 
     def __init__(self, mesh: Trimesh, arch_type=None):
         super().__init__(mesh, arch_type)  # Initialize common attributes in the base class
@@ -78,8 +82,8 @@ class ObbOrienter(BaseOrienter):
         class
         """
         self._get_obb()
-        self._check_axis_z_sign()
         self._check_axis_y_sign()
+        self._check_axis_z_sign()
         self._check_axis_x_sign()
 
     def _get_obb(self):
@@ -101,7 +105,7 @@ class ObbOrienter(BaseOrienter):
         approximated_up = normalize_vector([i.sum() for i in self.mesh.face_normals.T])
 
         # compare it with current up direction
-        agreement = np.dot(approximated_up, self._axisY)
+        agreement = np.dot(approximated_up, self.occlusal)
 
         self._axisY *= np.sign(agreement)  # swap sign if necessary
 
