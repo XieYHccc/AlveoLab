@@ -9,13 +9,12 @@ from AlveoLab.segmentation.isoline_voting import (
     extract_loop_candidates,
     compute_face_grad_magnitudes,
     pick_best_isoloops_per_tooth_dot_scissor,
+    point_in_poly_2d,
 )
 from AlveoLab.mesh import Mesh
-
-# from AlveoLab.segmentation.cutting_plane_select import find_optimal_gingiva_plane_trimesh
-# from AlveoLab.segmentation.cutting_plane import find_optimal_gingiva_plane_trimesh
+from AlveoLab.segmentation.tooth import Tooth
 from AlveoLab.segmentation.cutting import find_optimal_gingiva_plane_trimesh_mean_paperlike
-
+from AlveoLab.segmentation.extract_tooth_from_boundary import extract_tooth_submesh_from_candidate_faces
 
 def crop_mesh_above_plane_and_remap(
     mesh: tm.Trimesh,
@@ -105,6 +104,9 @@ class HarmonicBasedSeg:
         self.odd_teeth_args = []
         self.non_odd_teeth_args = []
         self.harmonic_field = None
+        self.tooth_boundaries = []
+        self.tooth_masks = []
+        self.segmented_teeth = []
 
         self._run()
 
@@ -121,6 +123,7 @@ class HarmonicBasedSeg:
         self._find_best_cutting_plane()
         self._compute_harmonic_field()
         self.tooth_boundaries = self.pick_best_isoloops_for_all_teeth(self.orienter.right, self.orienter.forward, n_isos=120, min_peak_ratio=0.6)
+        # self.extract_all_teeth_meshes()
 
     def _sort_teeth(self):
         """
@@ -166,30 +169,12 @@ class HarmonicBasedSeg:
         self.odd_teeth_peaks = odd_teeth_peaks
 
     def _find_best_cutting_plane(self):
-        # z_final, gingiva_ring_vidx, dbg = find_optimal_gingiva_plane_trimesh(
-        #     mesh=self.dental_mesh,  # trimesh.Trimesh
-        #     occlusal=self.orienter.occlusal,  # 方向向量
-        #     right=self.orienter.right,
-        #     forward=self.orienter.forward,
-        #     step_mm=0.5,
-        #     top_margin_mm=3.0,
-        #     delta_down_mm=1.2,
-        # )
-
-        # z_final, gingiva_ring_vidx, dbg = find_optimal_gingiva_plane_trimesh(
-        #     mesh_wrap=self.dental_mesh,           # 注意这里传 Mesh 包装对象
-        #     occlusal=self.orienter.occlusal,
-        #     step_mm=0.5,
-        #     top_margin_mm=3.0,
-        #     delta_down_mm=1.5,
-        #     curvature_mode="mean",                # 先跑通可用 mean
-        # )
-
         z_final, gingiva_ring_vidx, dbg =  find_optimal_gingiva_plane_trimesh_mean_paperlike(
             mesh_wrap=self.dental_mesh,
             occlusal=self.orienter.occlusal,
             step_mm=0.5,
             top_margin_mm=3.0,
+            close_tol= 1e-3
         )
 
         print("z_final:", z_final)
@@ -246,14 +231,14 @@ class HarmonicBasedSeg:
         # 将离群值clamp到这个范围
         hf_clamped = np.clip(phi, lower, upper)
 
-        lo, hi = np.percentile(phi, list(iso_percentile))
+        lo, hi = np.percentile(hf_clamped, list(iso_percentile))
         lo, hi = float(lo), float(hi)
         if hi - lo < 1e-12:
             raise RuntimeError("Harmonic field near-constant; cannot extract isoloops.")
 
         # 1) extract ALL loop candidates (closed components) across isovalues
         all_cands = extract_loop_candidates(
-            V=V, F=F, phi=phi,
+            V=V, F=F, phi=hf_clamped,
             right=right, forward=forward,
             lo=lo, hi=hi,
             n_isos=n_isos,
@@ -285,3 +270,47 @@ class HarmonicBasedSeg:
         )
         return results
 
+    def extract_all_teeth_meshes(self, store: bool = True):
+        """
+        按 self.teeth 的顺序提取每颗牙的网格，返回 List[Optional[tm.Trimesh]]。
+        若某颗牙没有 boundary / peaks / 提取失败，则该位置为 None（但顺序不变）。
+        """
+
+        # 基本健壮性：tooth_boundaries 应该已在 _run() 中算好
+        if not hasattr(self, "tooth_boundaries"):
+            raise RuntimeError("self.tooth_boundaries not found. Make sure _run() has been executed.")
+
+        tooth_meshes = []
+        tooth_region_masks = []  # 可选：保留 region_mask（原 mesh 面的 bool mask），方便 debug
+
+        for i, tooth in enumerate(self.teeth):
+            tb = self.tooth_boundaries[i]
+            cand = getattr(tb, "best", None)
+
+            # 没有 loop candidate
+            if cand is None or getattr(cand, "face_ids", None) is None or len(cand.face_ids) == 0:
+                tooth_meshes.append(None)
+                tooth_region_masks.append(None)
+                continue
+
+            # peaks 作为种子（你这套方法需要）
+            peak_vidx = np.asarray([p.index for p in tooth.peaks], dtype=np.int64)
+            if peak_vidx.size == 0:
+                tooth_meshes.append(None)
+                tooth_region_masks.append(None)
+                continue
+
+            tooth_tm, region_mask = extract_tooth_submesh_from_candidate_faces(
+                mesh=self.dental_mesh,
+                candidate=cand,
+                tooth_peak_vidx=peak_vidx,
+            )
+
+            tooth_meshes.append(tooth_tm)
+            tooth_region_masks.append(region_mask)
+
+        if store:
+            self.tooth_meshes = tooth_meshes
+            self.tooth_region_masks = tooth_region_masks
+
+        return tooth_meshes

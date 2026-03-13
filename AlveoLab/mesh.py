@@ -2,7 +2,9 @@ import trimesh as tm
 import numpy as np
 
 from AlveoLab.utils import LazyAttribute
-from AlveoLab.trimesh_utils import get_edge_based_curvature, get_face_face_adjacency, discrete_mean_curvature_measure
+from AlveoLab.trimesh_utils import (get_edge_based_curvature, get_face_face_adjacency,
+                                    discrete_mean_curvature_measure, discrete_gaussian_curvature_measure,
+                                    discrete_gaussian_curvature_measure_fast, discrete_minimum_curvature_measure)
 class Mesh:
     def __init__(self, trimesh_obj: tm.Trimesh):
         if not isinstance(trimesh_obj, tm.Trimesh):
@@ -59,5 +61,15 @@ class Mesh:
     @LazyAttribute
     def vertex_mean_curvature(self):
         return discrete_mean_curvature_measure(self._mesh)
+
+    @LazyAttribute
+    def vertex_gaussin_curvature(self):
+        return discrete_gaussian_curvature_measure_fast(self._mesh)
+
+    @LazyAttribute
+    def vertex_minimum_curvature(self):
+        return discrete_minimum_curvature_measure(self.vertex_mean_curvature, self.vertex_gaussin_curvature)
+
+
 
 

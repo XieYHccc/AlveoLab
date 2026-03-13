@@ -239,7 +239,7 @@ class LandmarkRecognizer:
         pass
 
     @LazyAttribute
-    def harmonic_filed(self):
+    def harmonic_field(self):
         non_tooth_point_indexes = []
         # for peaks in self.discarded_peaks.values():
         #     non_tooth_point_indexes.extend([peak.index for peak in peaks])

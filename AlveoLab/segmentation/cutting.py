@@ -42,10 +42,11 @@ def _variance_energy(vals: np.ndarray) -> float:
     return float(((vals - m) ** 2).sum() / (vals.size - 1))
 
 def _pick_first_decreasing_then_local_min(
+    z_arr: np.ndarray,
     e_norm: np.ndarray,
     start_drop_eps: float = 1e-4,
     rise_eps: float = 1e-4,
-    min_consecutive_drop: int = 2,
+    min_consecutive_drop: int = 1,
 ) -> int:
     """
     规则：
@@ -85,9 +86,10 @@ def _pick_first_decreasing_then_local_min(
     # ---------- 从递减段开始，找“首次由降转升” ----------
     valley_idx = start_idx
     best_val = e[start_idx]
-
     # 先向后追踪最小值
     for i in range(start_idx + 1, n):
+        if abs(z_arr[i] - z_arr[i - 1]) > 2:
+            return int(valley_idx)
         if e[i] < best_val:
             best_val = e[i]
             valley_idx = i
@@ -115,7 +117,7 @@ def find_optimal_gingiva_plane_trimesh_mean_paperlike(
     z_top = float(np.max(h) - top_margin_mm)
     z_bottom = float(np.min(h) - 1e-6)
 
-    mean_curv = np.asarray(mesh_wrap.vertex_mean_curvature, dtype=float).reshape(-1)
+    mean_curv = np.asarray(mesh_wrap.vertex_minimum_curvature, dtype=float).reshape(-1)
     if mean_curv.shape[0] != V.shape[0]:
         raise ValueError("vertex_mean_curvature length mismatch with mesh vertices.")
 
@@ -160,12 +162,14 @@ def find_optimal_gingiva_plane_trimesh_mean_paperlike(
 
     # 关键修改：第一次进入递减后的局部最小
     pick_idx = _pick_first_decreasing_then_local_min(
+        z_arr,
         e_norm,
         start_drop_eps=1e-4,
         rise_eps=1e-4,
         min_consecutive_drop=2
     )
 
+    # pick_idx += 1
     z_final = float(z_arr[pick_idx])
     loop_vid_pick = candidate[pick_idx][1]
 
