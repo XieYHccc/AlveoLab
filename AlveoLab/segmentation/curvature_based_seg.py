@@ -322,23 +322,23 @@ class CurvatureBasedSeg:
         self._predict_spillage_thresholds()
 
         # self.try_with_max_cost(0.9)
-        # self.test_max_costs()
-        # self.pick_optimal_max_cost()
+        self.test_max_costs()
+        self.pick_optimal_max_cost()
 
         # per-peak adaptive threshold
-        for peak in self.peaks:
-            peak.spilled = False
-
-        self._build_quadratic()
-        self._apply_per_peak_thresholds()
-
-        self._build_overlapping_area_groups()
-        self._build_quadratic()
-        for group in self.overlapping_area_groups:
-            group.update_quadratic(self.quadratic)
-
-        self._group_inline_area_groups()
-        self._build_teeth()
+        # for peak in self.peaks:
+        #     peak.spilled = False
+        #
+        # self._build_quadratic()
+        # self._apply_per_peak_thresholds()
+        #
+        # self._build_overlapping_area_groups()
+        # self._build_quadratic()
+        # for group in self.overlapping_area_groups:
+        #     group.update_quadratic(self.quadratic)
+        #
+        # self._group_inline_area_groups()
+        # self._build_teeth()
 
     def _build_peaks(self):
         #self.peaks = np.array([Peak(self.mesh.vertices[idx], idx) for idx in self._peak_indices])
@@ -945,7 +945,7 @@ class CurvatureBasedSeg:
                 # This is approximated lazily by looking at the last and first peak of each group
                 # peak_point1 = self.mesh.vertices[max(area_group_i.peaks)]
                 # peak_point2 = self.mesh.vertices[min(area_group_j.peaks)]
-                if geom.magnitude(area_group_i.peaks[-1].point - area_group_j.peaks[0].point) > self.MAX_TOOTH_WIDTH:
+                if geom.magnitude(area_group_i.peaks[-1].point - area_group_j.peaks[0].point) > 6:
                     continue
 
                 # Skip if they are too far apart in the occlusal direction.

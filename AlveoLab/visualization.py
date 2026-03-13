@@ -8,6 +8,7 @@ from AlveoLab.mesh import Mesh
 from AlveoLab.pyvista_utils import get_dental_plotter, draw_obb
 from AlveoLab.math.geometry import inner_product
 from AlveoLab.utils import load_labels
+from AlveoLab.segmentation.isoline_voting import extract_loop_candidates, point_in_poly_2d
 
 matplotlib.use("TkAgg")
 
@@ -22,11 +23,7 @@ class LandmarkRecognizerVisualization:
         self.mesh = landmark_recognizer.mesh
         self.orienter = self.lr.orienter
 
-        # setup pyvista mesh
-        faces_pv = np.hstack([np.full((self.mesh.faces.shape[0], 1), 3), self.mesh.faces]).flatten()
-        self.pv_mesh = pv.PolyData(self.mesh.vertices, faces_pv)
-        colors = np.tile(self.MESH_BACKGROUND_COLOR, (self.mesh.faces.shape[0], 1))
-        self.pv_mesh.cell_data["colors"] = colors
+        self._build_pv_mesh()
 
         # horizontal projections
         self.uv = np.c_[inner_product(self.mesh.vertices, self.orienter.right),
@@ -36,6 +33,94 @@ class LandmarkRecognizerVisualization:
         self.mesh_plot_attribute = ''
         self.mesh_plot_attribute_is_rgb = False
         self.cmap = 'viridis'
+
+        self._uniform_hf_isoloops = None
+
+    def _build_uniform_harmonic_isoloops(self, n_isos=80, min_points=20):
+        mesh = self.lr.harmonic_seg.dental_mesh
+        V = np.asarray(mesh.vertices, dtype=np.float64)
+        F = np.asarray(mesh.faces, dtype=np.int64)
+        phi = np.asarray(self.lr.harmonic_seg.harmonic_field, dtype=np.float64).reshape(-1)
+        lower, upper = np.percentile(phi, [5, 95])
+        # 将离群值clamp到这个范围
+        phi = np.clip(phi, lower, upper)
+
+        phi_min, phi_max = float(phi.min()), float(phi.max())
+        if phi_max - phi_min < 1e-12:
+            raise RuntimeError("Harmonic field is near-constant, cannot sample isolines.")
+        phi01 = (phi - phi_min) / (phi_max - phi_min)
+
+        loops = extract_loop_candidates(
+            V=V,
+            F=F,
+            phi=phi01,
+            right=self.orienter.right,
+            forward=self.orienter.forward,
+            lo=0.0,
+            hi=1.0,
+            n_isos=n_isos,
+            stitch_tol=1e-4,
+            close_tol=2e-3,
+            min_points=min_points,
+        )
+        return loops
+
+    def plot_uniform_harmonic_isolines(self, n_isos=80, line_width=5):
+        """从 harmonic field 的 [0,1] 均匀采样并绘制所有闭合 isoloops（colormap=jet_r）。"""
+        self.mesh = self.lr.harmonic_seg.dental_mesh
+        self._build_pv_mesh()
+        loops = self._build_uniform_harmonic_isoloops(n_isos=n_isos)
+        self._uniform_hf_isoloops = loops
+
+        cm = matplotlib.colormaps.get_cmap("jet_r")
+        for c in loops:
+            color = cm(float(np.clip(c.iso, 0.0, 1.0)))[:3]
+            self.plot_polyline(c.poly3d, color=color, line_width=line_width)
+
+    def plot_tooth_isoloops_from_peaks(self, peaks, n_isos=80, min_peak_ratio=0.6, line_width=5):
+        """
+        给定一颗牙的 peaks（Peak 对象列表或顶点索引列表），
+        从均匀采样的 isoloops 中筛选“包住这颗牙” 的 loop 并绘制。
+        if self._uniform_hf_isoloops is None:
+        """
+        self._uniform_hf_isoloops = self._build_uniform_harmonic_isoloops(n_isos=n_isos)
+
+        mesh = self.lr.harmonic_seg.dental_mesh
+        V = np.asarray(mesh.vertices, dtype=np.float64)
+
+        peak_idx = []
+        for p in peaks:
+            if hasattr(p, "index"):
+                peak_idx.append(int(p.index))
+            else:
+                peak_idx.append(int(p))
+        peak_idx = np.asarray(peak_idx, dtype=np.int64)
+        if peak_idx.size == 0:
+            return
+
+        peaks3d = V[peak_idx]
+        peaks2d = np.c_[peaks3d @ self.orienter.right, peaks3d @ self.orienter.forward]
+
+        cm = matplotlib.colormaps.get_cmap("jet_r")
+        for c in self._uniform_hf_isoloops:
+            inside = 0
+            for p2d in peaks2d:
+                if point_in_poly_2d(p2d, c.poly2d):
+                    inside += 1
+            cov = inside / max(1, len(peaks2d))
+            if cov >= min_peak_ratio:
+                color = cm(float(np.clip(c.iso, 0.0, 1.0)))[:3]
+                self.plot_polyline(c.poly3d, color=color, line_width=line_width)
+
+        for peak in peaks:
+            self.plot_sphere_at_point(peak.point, color='blue', radius=0.3)
+
+    def _build_pv_mesh(self):
+        # setup pyvista mesh
+        faces_pv = np.hstack([np.full((self.mesh.faces.shape[0], 1), 3), self.mesh.faces]).flatten()
+        self.pv_mesh = pv.PolyData(self.mesh.vertices, faces_pv)
+        colors = np.tile(self.MESH_BACKGROUND_COLOR, (self.mesh.faces.shape[0], 1))
+        self.pv_mesh.cell_data["colors"] = colors
 
     def plot_polyline(self, pts, color="yellow", line_width=4):
         """pts: (N,3) numpy array"""
@@ -49,7 +134,7 @@ class LandmarkRecognizerVisualization:
         self.plotter.add_mesh(poly, color=color, line_width=line_width)
 
     def plot_harmonic_field(self):
-        hf = self.lr.harmonic_filed
+        hf = self.lr.harmonic_field
 
         print(hf.min(), hf.max())
         lower, upper = np.percentile(hf, [5, 95])
@@ -62,16 +147,9 @@ class LandmarkRecognizerVisualization:
 
         self.pv_mesh.point_data["harmonic_filed"] = hf_clamped
 
-        self.mesh_plot_attribute = 'harmonic_filed'
-        self.mesh_plot_attribute_is_rgb = False
-
-        vertices = self.lr.harmonic_seg.dental_mesh.vertices
-        for peak_idx in self.lr.harmonic_seg.odd_teeth_peaks:
-            self.plot_sphere_at_point(vertices[peak_idx], color='red')
-        for peak_idx in self.lr.harmonic_seg.even_teeth_peaks:
-            self.plot_sphere_at_point(vertices[peak_idx], color='blue')
-        for idx in self.lr.harmonic_seg.gingiva_vertices_indexes:
-            self.plot_sphere_at_point(vertices[idx], color='green')
+        # self.mesh_plot_attribute = 'harmonic_filed'
+        # self.mesh_plot_attribute_is_rgb = False
+        # self.cmap = 'jet_r'
 
         # for poly in self.lr.harmonic_seg.best_iso_line.polylines:
         #     self.plot_polyline(poly, color="yellow", line_width=5)
@@ -81,18 +159,28 @@ class LandmarkRecognizerVisualization:
             if r.best is None:
                 print("没边界")
                 continue
-            self.plot_polyline(r.best.poly3d, color="white", line_width=5)
+            self.plot_polyline(r.best.poly3d, color="green", line_width=8)
         print(len(self.lr.harmonic_seg.tooth_boundaries))
+
+    def plot_hf_contraints_points(self):
+        vertices = self.lr.harmonic_seg.dental_mesh.vertices
+        for peak_idx in self.lr.harmonic_seg.odd_teeth_peaks:
+            self.plot_sphere_at_point(vertices[peak_idx], color='red', radius=0.3)
+        for peak_idx in self.lr.harmonic_seg.even_teeth_peaks:
+            self.plot_sphere_at_point(vertices[peak_idx], color='blue', radius=0.3)
+        # for idx in self.lr.harmonic_seg.gingiva_vertices_indexes:
+        #     self.plot_sphere_at_point(vertices[idx], color='green', radius=0.3)
 
     def plot_height_threshold_plane(self):
         heights = np.inner(self.mesh.vertices, self.orienter.occlusal)  # (N,)
         max_idx = int(np.argmax(heights))  # 最大值对应的vertex索引
 
         # 计算水平面上的一个点（这里用原点加上法向量乘以高度阈值）
-        point_on_plane = self.mesh.vertices[max_idx] - self.orienter.occlusal * 10
+        # point_on_plane = self.mesh.vertices[max_idx] - self.orienter.occlusal * 10
+        point_on_plane = self.orienter.occlusal * self.lr.harmonic_seg.cutting_plane_height
 
         # 创建一个大平面
-        plane_size = 200
+        plane_size = 80
         plane = pv.Plane(center=point_on_plane, direction=self.orienter.occlusal, i_size=plane_size, j_size=plane_size)
 
         # 绘制平面，设置半透明
@@ -104,7 +192,7 @@ class LandmarkRecognizerVisualization:
     def plot_valid_peaks(self, color):
         for peak in self.lr.seg.valid_peaks:
             peak_point = peak.point
-            self.plot_sphere_at_point(peak_point, color, 0.5, 0.8)
+            self.plot_sphere_at_point(peak_point, color, 0.3, 0.8)
 
     def plot_discarded_peaks(self, discarded_type, color='red'):
         if discarded_type == "All":
@@ -186,6 +274,17 @@ class LandmarkRecognizerVisualization:
 
         self.mesh_plot_attribute = "colors"
         self.mesh_plot_attribute_is_rgb = True
+
+    def plot_harmonic_teeth(self):
+        hf = self.lr.harmonic_field
+        self.mesh = self.lr.harmonic_seg.dental_mesh
+        self._build_pv_mesh()
+
+        for mask in self.lr.harmonic_seg.tooth_region_masks:
+            colors = np.random.rand(3)
+            self.pv_mesh.cell_data["colors"][mask] = colors
+            self.mesh_plot_attribute = "colors"
+            self.mesh_plot_attribute_is_rgb = True
 
     def plot_discarded_overlapping_areas(self):
         for groups in self.lr.seg.discarded_overlap_groups.values():
@@ -342,7 +441,7 @@ class LandmarkRecognizerVisualization:
 
     def add_mesh_with_labels(self, mesh, labels):
         palette = np.array([
-            [255, 153, 153],  # gingiva
+            [255, 255, 255],  # gingiva
             [153, 76, 0], [153, 153, 0], [76, 153, 0], [0, 153, 153], [0, 0, 153], [153, 0, 153],
             [255, 128, 0], [153, 153, 0], [76, 153, 0], [0, 153, 153], [0, 0, 153], [153, 0, 153],
         ]) / 255
@@ -497,128 +596,48 @@ class LandmarkRecognizerVisualization:
             for p in peaks:
                 self.plot_sphere_at_point(p.point, color="black", radius=0.45, opacity=1.0)
 
-    def plot_all_candidates_energy_accumulated_heatmap(
+    def plot_final_cut_loop_green(
             self,
             dbg: dict,
-            use_norm: bool = True,  # True: candidate_energy_norm
-            close_tol: float = 1e-3,
-            min_loop_points: int = 20,
-            ring_band_mm: float = 0.8,  # 距离候选平面多近的顶点算“被该候选覆盖”
-            weight_mode: str = "inverse",  # "direct" or "inverse"
-            aggregate: str = "mean",  # "sum" / "mean" / "max"
-            cmap: str = "jet_r",
-            clip_percentile=(2, 98),
-            show_scalar_bar=True,
-            title: str = "All-candidate energy heatmap",
+            line_width: float = 6.0,
+            opacity: float = 1.0,
+            render_lines_as_tubes: bool = True,
     ):
         """
-        把所有candidate能量都投影到mesh上：
-        - 对每个candidate z_i，找到距离该平面 <= ring_band_mm 的顶点集合 band_i
-        - 将该candidate能量 E_i 累加到 band_i
-        - 最后聚合(sum/mean/max)并转成 face-level 画热图
+        只画 dbg["zfinal"] 对应的最优裁剪平面截交曲线（假设只有一个 loop），颜色固定绿色。
+        dbg: landmark_recognizer.harmonic_seg.debug
         """
+        import numpy as np
+        import pyvista as pv
 
-        # ---------- 读取candidate ----------
-        if "candidate_z" not in dbg:
-            raise ValueError("dbg 缺少 candidate_z")
-        z_cand = np.asarray(dbg["candidate_z"], dtype=float).reshape(-1)
+        z = float(dbg["z_final"])
 
-        if z_cand.size == 0:
-            raise ValueError("candidate_z 为空")
+        mesh_tm = self.mesh
 
-        e_key = "candidate_energy_norm" if use_norm else "candidate_energy_raw"
-        if e_key not in dbg:
-            raise ValueError(f"dbg 缺少 {e_key}")
-        e_cand = np.asarray(dbg[e_key], dtype=float).reshape(-1)
-        if e_cand.shape[0] != z_cand.shape[0]:
-            raise ValueError("candidate_z 与 energy 长度不一致")
-
-        # ---------- mesh & height ----------
-        V = np.asarray(self.mesh.vertices, dtype=float)  # (N,3)
-        F = np.asarray(self.mesh.faces, dtype=np.int64)  # (M,3)
         n = np.asarray(self.orienter.occlusal, dtype=float)
         n /= (np.linalg.norm(n) + 1e-12)
-        h_v = V @ n  # 每个顶点沿occlusal高度
 
-        N = V.shape[0]
+        sec = mesh_tm.section(plane_origin=n * z, plane_normal=n)
+        if sec is None or len(sec.discrete) == 0:
+            raise RuntimeError(f"zfinal={z:.6f} 截平面没有得到截交曲线")
 
-        # 每个候选能量转为“热度权重”
-        # direct: 能量越大越热；inverse: 能量越小越热（更像“好平面区域”）
-        if weight_mode == "direct":
-            w_cand = e_cand.copy()
-        elif weight_mode == "inverse":
-            # 防止除0：用1-e（norm）或用线性反转
-            if use_norm:
-                w_cand = 1.0 - np.clip(e_cand, 0.0, 1.0)
-            else:
-                # raw时做鲁棒归一化再反转
-                finite = np.isfinite(e_cand)
-                if finite.any():
-                    lo, hi = np.percentile(e_cand[finite], [5, 95])
-                    if hi - lo > 1e-12:
-                        en = np.clip((e_cand - lo) / (hi - lo), 0.0, 1.0)
-                    else:
-                        en = np.zeros_like(e_cand)
-                else:
-                    en = np.zeros_like(e_cand)
-                w_cand = 1.0 - en
-        else:
-            raise ValueError("weight_mode 只能是 'direct' 或 'inverse'")
+        pts = np.asarray(sec.discrete[0], dtype=float)  # 只有一个 loop
+        npts = pts.shape[0]
+        if npts < 2:
+            return
 
-        # ---------- 累加到顶点 ----------
-        acc = np.zeros(N, dtype=float)
-        cnt = np.zeros(N, dtype=float)
-        mx = np.full(N, -np.inf, dtype=float)
+        poly = pv.PolyData(pts)
+        poly.lines = np.hstack([[npts], np.arange(npts, dtype=np.int64)])
 
-        for z, w in zip(z_cand, w_cand):
-            band_mask = np.abs(h_v - float(z)) <= float(ring_band_mm)  # 该候选平面带状邻域
-            if not np.any(band_mask):
-                continue
-
-            if aggregate in ("sum", "mean"):
-                acc[band_mask] += float(w)
-                cnt[band_mask] += 1.0
-            elif aggregate == "max":
-                mx[band_mask] = np.maximum(mx[band_mask], float(w))
-            else:
-                raise ValueError("aggregate 只能是 'sum'/'mean'/'max'")
-
-        if aggregate == "sum":
-            vertex_heat = acc
-        elif aggregate == "mean":
-            vertex_heat = np.divide(acc, cnt, out=np.zeros_like(acc), where=cnt > 0)
-        else:  # max
-            vertex_heat = np.where(np.isfinite(mx), mx, 0.0)
-
-        # ---------- vertex -> face ----------
-        face_heat = vertex_heat[F].mean(axis=1)
-
-        finite = np.isfinite(face_heat)
-        if not finite.any():
-            raise RuntimeError("face_heat 全是非有限值，检查candidate与ring_band_mm")
-
-        vmin, vmax = np.percentile(face_heat[finite], clip_percentile)
-        vmin, vmax = float(vmin), float(vmax)
-        if np.isclose(vmin, vmax):
-            vmax = vmin + 1e-6
-
-        face_heat = np.clip(face_heat, vmin, vmax)
-
-        # ---------- 上图 ----------
-        key = "all_candidates_energy_heat"
-        self.pv_mesh.cell_data[key] = face_heat
         self.plotter.add_mesh(
-            self.pv_mesh,
-            scalars=key,
-            cmap=cmap,
-            clim=(vmin, vmax),
-            opacity=1.0,
-            specular=0.0,
-            ambient=0.2,
-            show_scalar_bar=show_scalar_bar,
-            scalar_bar_args={"title": title} if show_scalar_bar else None,
+            poly,
+            color="green",
+            line_width=line_width,
+            opacity=opacity,
+            render_lines_as_tubes=render_lines_as_tubes,
         )
 
+        return z
     def plot_candidate_loops_colored_by_energy(
             self,
             dbg: dict,
@@ -632,9 +651,6 @@ class LandmarkRecognizerVisualization:
             opacity: float = 1.0,
             show_scalar_bar: bool = True,
             scalar_title: str = "Candidate energy",
-            draw_picked_as_sphere: bool = True,
-            picked_sphere_radius: float = 0.8,
-            picked_color: str = "white",
     ):
         """
         画所有candidate对应的截交闭环曲线，颜色由candidate energy决定。
@@ -756,15 +772,6 @@ class LandmarkRecognizerVisualization:
                 scalar_bar_args={"title": scalar_title},
             )
 
-        # 高亮 picked 候选（可选）
-        if draw_picked_as_sphere and picked_center is not None:
-            self.plotter.add_mesh(
-                pv.Sphere(radius=picked_sphere_radius, center=picked_center),
-                color=picked_color,
-                opacity=1.0
-            )
-
-
 if __name__ == '__main__':
     import trimesh as tm
     from AlveoLab.landmark_recognizer import LandmarkRecognizer
@@ -772,13 +779,13 @@ if __name__ == '__main__':
     # mesh: tm.Trimesh = tm.load_mesh('../data/1JMandibular_export.stl')
     # mesh1: tm.Trimesh = tm.load_mesh('../data/models5y/0609_5 YR_Mandibular_export.stl')
     # mesh: tm.Trimesh = tm.load_mesh('../data/labeld_5year_betterv_objs/0709_5 YR_Mandibular_export.obj')
-    # labels1 = load_labels('../data/labeld_5year_betterv_objs/0580_5yr_Maxillary_export.json')
+    labels2 = load_labels('../data/labeld_5year_betterv_objs/0715_5YR_Maxillary_export.json')
 
     # mesh2 = Mesh.from_file('../data/models5y/0709_5 YR_Maxillary_export.stl')
-    mesh2 = Mesh.from_file('../data/labeld_5year_betterv_objs/0611_5yr_Maxillary_export.obj')
-    # mesh2 = Mesh.from_file('../data/models5y/0800_5 year_Maxillary_export.stl')
+    mesh2 = Mesh.from_file('../data/labeld_5year_betterv_objs/0715_5YR_Maxillary_export.obj')
+    # mesh2 = Mesh.from_file('../data/labeld_5year_betterv_objs/0609_5 YR_Maxillary_export.obj')
 
-    landmark_recognizer = LandmarkRecognizer(mesh2, 'L')
+    landmark_recognizer = LandmarkRecognizer(mesh2, 'U')
     #
     # for peak in landmark_recognizer.seg.peaks:
     #     viz = LandmarkRecognizerVisualization(landmark_recognizer)
@@ -793,8 +800,8 @@ if __name__ == '__main__':
     viz = LandmarkRecognizerVisualization(landmark_recognizer)
     # viz.plot_teeth()
     # viz.plot_discarded_overlapping_areas()
-    # viz.add_mesh_with_labels(mesh1, labels1)
-    # viz.plot_valid_peaks("green")
+    viz.add_mesh_with_labels(mesh2, labels2)
+    # viz.plot_valid_peaks("black")
     # viz.plot_discarded_peaks("Spilled", color='red')
     # viz.plot_discarded_peaks("All", color='black')
     # viz.plot_discarded_peaks("Gingiva Peaks", color='green')
@@ -808,7 +815,7 @@ if __name__ == '__main__':
     # viz.plot_horizon_convex_hull()
     # viz.plot_horizon_bounding_box()
     # viz.plot_dental_quadratic()
-    # viz.plot_height_threshold_plane()
+    # viz.plot_height_threshold_plane()0
     # viz.plot_all_valid_peak_masks()
     # viz.plot_all_overlapping_group_masks()
     # viz.plot_mesh()
@@ -818,6 +825,7 @@ if __name__ == '__main__':
     #     ], bcolor=None, border=False, face=pv.Sphere(), loc="upper center", size=(0.1, 0.1))
 
 
+
     # viz.plot_peak_accumulative_cost_no_mask(landmark_recognizer.seg.peaks[19])
     # print(landmark_recognizer.seg.peak_max_costs[landmark_recognizer.seg.peaks[19]])
     # landmark_recognizer.seg.parse_spread(landmark_recognizer.seg.peaks[32], 2)
@@ -825,26 +833,23 @@ if __name__ == '__main__':
     # for idx, peak in enumerate(landmark_recognizer.seg.peaks):
     #     if peak.spilled:
     #         print(idx)
-    viz.plot_harmonic_field()
-    hf = landmark_recognizer.harmonic_filed
-    # viz.plot_all_candidates_energy_accumulated_heatmap(
-    #     dbg=landmark_recognizer.harmonic_seg.debug,
-    #     use_norm=True,
-    #     weight_mode="inverse",  # 低能=高热
-    #     aggregate="mean",  # 对每个顶点取候选平均贡献
-    #     ring_band_mm=0.8,  # 0.6~1.2可调
-    #     cmap="jet_r",
-    #     title="All candidate planes (low energy = hot)"
-    # )
+    # viz.plot_harmonic_field()
+    # hf = landmark_recognizer.harmonic_field
     # viz.plot_candidate_loops_colored_by_energy(
     #     dbg=landmark_recognizer.harmonic_seg.debug,
     #     use_norm=True,  # 看归一化能量
     #     only_single_loop=True,  # 论文风格
     #     cmap="jet_r",
     #     line_width=5.0,
-    #     scalar_title="Candidate energy (norm)"
+    #     scalar_title="curvature variance energy"
     # )
-    viz.plot_mesh()
+    # viz.plot_height_threshold_plane()
+    # viz.plot_final_cut_loop_green(dbg=landmark_recognizer.harmonic_seg.debug)
+    # viz.plot_harmonic_teeth()
+    # viz.plot_uniform_harmonic_isolines()
+    # viz.plot_hf_contraints_points()
+    # viz.plot_tooth_isoloops_from_peaks(peaks=landmark_recognizer.harmonic_seg.teeth[4].peaks)
+    # viz.plot_mesh()
     # landmark_recognizer.seg.parse_spread()
     # viz.plot_all_peaks_accumulative_cost_no_mask()
     viz.show()

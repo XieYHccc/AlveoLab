@@ -148,6 +148,58 @@ def discrete_mean_curvature_measure(mesh):
 
     return np.array(mean_curv)
 
+def discrete_gaussian_curvature_measure(mesh):
+    """Calculate discrete Gaussian curvature (angle defect / barycentric area)."""
+    n_vertices = len(mesh.vertices)
+    angle_sums = np.zeros(n_vertices, dtype=float)
+    barycentric_areas = np.zeros(n_vertices, dtype=float)
+
+    face_angles = mesh.face_angles
+    for face_id, tri in enumerate(mesh.faces):
+        area_share = mesh.area_faces[face_id] / 3.0
+        for local_id, vertex_id in enumerate(tri):
+            angle_sums[vertex_id] += face_angles[face_id, local_id]
+            barycentric_areas[vertex_id] += area_share
+
+    gaussian_curv = np.zeros(n_vertices, dtype=float)
+    valid = barycentric_areas > 1e-12
+    gaussian_curv[valid] = (2.0 * np.pi - angle_sums[valid]) / barycentric_areas[valid]
+    return gaussian_curv
+
+def discrete_gaussian_curvature_measure_fast(mesh, eps=1e-12):
+    """Angle defect / barycentric area, vectorized with bincount."""
+    n_vertices = len(mesh.vertices)
+
+    faces = np.asarray(mesh.faces)                 # (F, 3), int
+    face_angles = np.asarray(mesh.face_angles)     # (F, 3), float
+    area_faces = np.asarray(mesh.area_faces)       # (F,), float
+
+    # 每个面给每个顶点分 1/3 面积
+    area_share = (area_faces / 3.0).astype(np.float64)   # (F,)
+
+    # 展平后对每个 vertex 做加和
+    v_idx = faces.reshape(-1)                      # (F*3,)
+    angles_flat = face_angles.reshape(-1)          # (F*3,)
+
+    angle_sums = np.bincount(v_idx, weights=angles_flat, minlength=n_vertices)
+    barycentric_areas = np.bincount(v_idx, weights=np.repeat(area_share, 3), minlength=n_vertices)
+
+    gaussian_curv = np.zeros(n_vertices, dtype=np.float64)
+    valid = barycentric_areas > eps
+    gaussian_curv[valid] = (2.0 * np.pi - angle_sums[valid]) / barycentric_areas[valid]
+    return gaussian_curv
+
+def discrete_minimum_curvature_measure(mean_curv, gaussian_curv):
+    """
+    Calculate minimum principal curvature per vertex.
+
+    Uses:
+      H = mean curvature
+      K = Gaussian curvature
+      k_min = H - sqrt(max(H^2 - K, 0))
+    """
+    delta = np.maximum(mean_curv * mean_curv - gaussian_curv, 0.0)
+    return mean_curv - np.sqrt(delta)
 
 def smooth_curvature(mesh, curvature, iterations=3):
     """Simple neighborhood averaging of vertex curvature."""
