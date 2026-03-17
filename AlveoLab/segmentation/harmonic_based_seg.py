@@ -12,9 +12,9 @@ from AlveoLab.segmentation.isoline_voting import (
     point_in_poly_2d,
 )
 from AlveoLab.mesh import Mesh
-from AlveoLab.segmentation.tooth import Tooth
 from AlveoLab.segmentation.cutting import find_optimal_gingiva_plane_trimesh_mean_paperlike
 from AlveoLab.segmentation.extract_tooth_from_boundary import extract_tooth_submesh_from_candidate_faces
+from AlveoLab.segmentation.label_arrays import build_face_and_vertex_label_arrays
 
 def crop_mesh_above_plane_and_remap(
     mesh: tm.Trimesh,
@@ -93,6 +93,7 @@ class HarmonicBasedSeg:
     """
 
     def __init__(self, dental_mesh, teeth, non_tooth_point_indexes, dental_quadratic, orienter):
+        self.original_dental_mesh = dental_mesh
         self.dental_mesh = dental_mesh
         self.teeth = teeth
         self.non_tooth_point_indexes = non_tooth_point_indexes
@@ -105,8 +106,15 @@ class HarmonicBasedSeg:
         self.non_odd_teeth_args = []
         self.harmonic_field = None
         self.tooth_boundaries = []
-        self.tooth_masks = []
-        self.segmented_teeth = []
+        self.tooth_region_masks = []
+        self.original_tooth_region_masks = []
+        self.cropped_face_to_original_face = None
+        self.original_face_to_cropped_face = None
+
+
+        self.harmonic_face_labels = None
+        self.harmonic_vertex_labels = None
+
 
         self._run()
 
@@ -123,7 +131,8 @@ class HarmonicBasedSeg:
         self._find_best_cutting_plane()
         self._compute_harmonic_field()
         self.tooth_boundaries = self.pick_best_isoloops_for_all_teeth(self.orienter.right, self.orienter.forward, n_isos=120, min_peak_ratio=0.6)
-        # self.extract_all_teeth_meshes()
+        self.extract_all_teeth_meshes()
+        self.assemble_all_label_arrays()
 
     def _sort_teeth(self):
         """
@@ -194,6 +203,16 @@ class HarmonicBasedSeg:
 
         # 2) 把 trimesh -> 你的 Mesh 包装类（如果需要）
         self.dental_mesh = Mesh(new_mesh_tm)
+        self.cropped_face_to_original_face = np.asarray(kept_faces, dtype=np.int64)
+        self.original_face_to_cropped_face = np.full(
+            self.original_dental_mesh.faces.shape[0],
+            -1,
+            dtype=np.int64,
+        )
+        self.original_face_to_cropped_face[self.cropped_face_to_original_face] = np.arange(
+            self.cropped_face_to_original_face.shape[0],
+            dtype=np.int64,
+        )
 
         # 3) 映射 gingiva ring 顶点索引
         self.gingiva_vertices_indexes = remap_vertex_indices(old_to_new, self.gingiva_vertices_indexes)
@@ -314,3 +333,64 @@ class HarmonicBasedSeg:
             self.tooth_region_masks = tooth_region_masks
 
         return tooth_meshes
+
+    def remap_face_mask_to_original(self, cropped_face_mask: np.ndarray) -> np.ndarray:
+        """
+        Map a cropped-mesh face mask back to the original mesh face space.
+        """
+        if self.cropped_face_to_original_face is None:
+            raise RuntimeError("Face remapping is not available before cropping has been performed.")
+
+        cropped_face_mask = np.asarray(cropped_face_mask, dtype=bool).reshape(-1)
+        if cropped_face_mask.shape[0] != self.dental_mesh.faces.shape[0]:
+            raise ValueError("cropped_face_mask length does not match the cropped mesh face count.")
+
+        original_face_mask = np.zeros(self.original_dental_mesh.faces.shape[0], dtype=bool)
+        original_face_mask[self.cropped_face_to_original_face[cropped_face_mask]] = True
+        return original_face_mask
+
+    def get_original_tooth_region_masks(self):
+        """
+        Return per-tooth face masks in the original mesh face space.
+        """
+        original_masks = []
+        for region_mask in self.tooth_region_masks:
+            if region_mask is None:
+                original_masks.append(None)
+            else:
+                original_masks.append(self.remap_face_mask_to_original(region_mask))
+
+        self.original_tooth_region_masks = original_masks
+        return original_masks
+
+    def face_mask_to_vertex_mask(self, face_mask: np.ndarray, on_original: bool = False) -> np.ndarray:
+        """
+        Convert a face-level bool mask to a vertex-level bool mask.
+        """
+        mesh = self.original_dental_mesh if on_original else self.dental_mesh
+        face_mask = np.asarray(face_mask, dtype=bool).reshape(-1)
+        if face_mask.shape[0] != mesh.faces.shape[0]:
+            raise ValueError("face_mask length does not match the selected mesh face count.")
+
+        vertex_mask = np.zeros(mesh.vertices.shape[0], dtype=bool)
+        if np.any(face_mask):
+            vertex_mask[np.unique(mesh.faces[face_mask].reshape(-1))] = True
+        return vertex_mask
+
+    def build_harmonic_label_arrays(self):
+        """
+        Build per-face and per-vertex labels from harmonic segmentation masks
+        in the original mesh space.
+        """
+        original_masks = self.get_original_tooth_region_masks()
+        tooth_keys = [tooth.key for tooth in self.teeth]
+        self.harmonic_face_labels, self.harmonic_vertex_labels = build_face_and_vertex_label_arrays(
+            self.original_dental_mesh,
+            original_masks,
+            tooth_keys,
+        )
+        return self.harmonic_face_labels, self.harmonic_vertex_labels
+
+
+    def assemble_all_label_arrays(self):
+        self.build_harmonic_label_arrays()

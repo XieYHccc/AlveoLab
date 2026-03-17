@@ -125,7 +125,8 @@ def find_optimal_gingiva_plane_trimesh_mean_paperlike(
     dbg_steps = []
     one_loop_started = False
 
-    z = z_top
+    still_tooth_region = True
+    z = z_top - 5
     while z >= z_bottom:
         loops = _extract_plane_components_as_vertex_loops(tm_mesh, n * z, n)
         closed_loops = [lp for lp in loops if _is_closed_polyline(lp, close_tol) and lp.shape[0] >= min_loop_points]
@@ -133,6 +134,8 @@ def find_optimal_gingiva_plane_trimesh_mean_paperlike(
         rec = {"z": float(z), "n_loops": int(len(closed_loops)), "accepted": False, "energy": None}
 
         if len(closed_loops) == 1:
+            if still_tooth_region:
+                still_tooth_region = False
             one_loop_started = True
             loop_vid = np.unique(_nearest_vertex_ids(tm_mesh, closed_loops[0]))
             if loop_vid.size >= 3:
@@ -140,9 +143,11 @@ def find_optimal_gingiva_plane_trimesh_mean_paperlike(
                 candidate.append((float(z), loop_vid, float(e)))
                 rec["accepted"] = True
                 rec["energy"] = float(e)
+        else:
+            if still_tooth_region is False:
+                break
 
         dbg_steps.append(rec)
-
         if one_loop_started and len(closed_loops) == 0:
             break
 
@@ -169,7 +174,7 @@ def find_optimal_gingiva_plane_trimesh_mean_paperlike(
         min_consecutive_drop=2
     )
 
-    # pick_idx += 1
+    # pick_idx +=
     z_final = float(z_arr[pick_idx])
     loop_vid_pick = candidate[pick_idx][1]
 

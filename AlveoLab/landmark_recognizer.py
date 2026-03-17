@@ -13,6 +13,7 @@ from AlveoLab.trimesh_utils import (get_local_maximum_along_dir, get_local_maxim
                                     discrete_mean_curvature_measure, smooth_curvature)
 from AlveoLab.segmentation.curvature_based_seg import CurvatureBasedSeg
 from AlveoLab.segmentation.harmonic_based_seg import HarmonicBasedSeg
+from AlveoLab.segmentation.label_arrays import build_face_and_vertex_label_arrays
 from AlveoLab.mesh import Mesh
 from AlveoLab.peak import Peak
 
@@ -64,6 +65,8 @@ class LandmarkRecognizer:
         self.horizontal_hull = None
         self.seg = None
         self.harmonic_seg = None
+        self.teeth_face_labels = None
+        self.teeth_vertex_labels = None
 
         self.height_threshold = 0.0
         self.peaks = []
@@ -115,12 +118,13 @@ class LandmarkRecognizer:
         self._run_step(self._remove_peaks_near_boundary, "remove_peaks_near_boundary")
         self._run_step(self._remove_peaks_on_gingiva, "remove_peaks_on_gingiva")  #TODO: acutually not works well
         self._run_step(self._segment_teeth, "segment_teeth")
+        self._run_step(self._assemble_teeth_label_arrays, "assemble_teeth_labels")
 
         total_elapsed = time.perf_counter() - total_start
         logger.info(f"[pipeline] all steps finished in {total_elapsed:.3f}s")
 
     def _find_orientation(self):
-        self.orienter = ObbOrienter(self.mesh, self.arch_type)
+        self.orienter = PcaOrienter(self.mesh, self.arch_type)
 
     def _preprocess_mesh(self):
         cutting_plane_offset = self.height_threshold - 4 #TODO: adaptive offset
@@ -231,6 +235,15 @@ class LandmarkRecognizer:
         # update peak indices after segmentation, spilled peaks are removed
         self.peaks = self.seg.valid_peaks
         self.teeth = self.seg.teeth
+
+    def _assemble_teeth_label_arrays(self):
+        tooth_masks = [tooth.mask for tooth in self.teeth]
+        tooth_keys = [tooth.key for tooth in self.teeth]
+        self.teeth_face_labels, self.teeth_vertex_labels = build_face_and_vertex_label_arrays(
+            self.mesh,
+            tooth_masks,
+            tooth_keys,
+        )
 
     def _label_teeth(self):
         pass

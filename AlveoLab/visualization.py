@@ -156,13 +156,9 @@ class LandmarkRecognizerVisualization:
 
         self.pv_mesh.point_data["harmonic_filed"] = hf_clamped
 
-        # self.mesh_plot_attribute = 'harmonic_filed'
-        # self.mesh_plot_attribute_is_rgb = False
-        # self.cmap = 'jet_r'
-
-        # for poly in self.lr.harmonic_seg.best_iso_line.polylines:
-        #     self.plot_polyline(poly, color="yellow", line_width=5)
-        # self.plot_polyline(self.lr.harmonic_seg.best_iso_line.polylines[2], color="yellow", line_width=5)
+        self.mesh_plot_attribute = 'harmonic_filed'
+        self.mesh_plot_attribute_is_rgb = False
+        self.cmap = 'jet_r'
 
         for r in self.lr.harmonic_seg.tooth_boundaries:
             if r.best is None:
@@ -269,7 +265,6 @@ class LandmarkRecognizerVisualization:
                 label = str(tooth.palmer)
             else:
                 label = f"{idx}"
-
             # # 5. 在牙的中心位置画文字标签，颜色和牙的颜色一致
             # self.plotter.add_point_labels(
             #     [center],          # 一个点
@@ -286,14 +281,20 @@ class LandmarkRecognizerVisualization:
 
     def plot_harmonic_teeth(self):
         hf = self.lr.harmonic_field
-        self.mesh = self.lr.harmonic_seg.dental_mesh
-        self._build_pv_mesh()
+        # self.mesh = self.lr.harmonic_seg.dental_mesh
+        # self._build_pv_mesh()
 
-        for mask in self.lr.harmonic_seg.tooth_region_masks:
+        tooth_masks = self.lr.harmonic_seg.get_original_tooth_region_masks()
+        # tooth_masks = np.array(list(tooth_masks))
+        print(len(tooth_masks))
+        for mask in tooth_masks:
+            if mask is None:
+                continue
             colors = np.random.rand(3)
             self.pv_mesh.cell_data["colors"][mask] = colors
-            self.mesh_plot_attribute = "colors"
-            self.mesh_plot_attribute_is_rgb = True
+
+        self.mesh_plot_attribute = "colors"
+        self.mesh_plot_attribute_is_rgb = True
 
     def plot_discarded_overlapping_areas(self):
         for groups in self.lr.seg.discarded_overlap_groups.values():
@@ -872,31 +873,20 @@ if __name__ == '__main__':
     import trimesh as tm
     from AlveoLab.landmark_recognizer import LandmarkRecognizer
 
-    # mesh: tm.Trimesh = tm.load_mesh('../data/1JMandibular_export.stl')
-    # mesh1: tm.Trimesh = tm.load_mesh('../data/models5y/0609_5 YR_Mandibular_export.stl')
-    # mesh: tm.Trimesh = tm.load_mesh('../data/labeld_5year_betterv_objs/0709_5 YR_Mandibular_export.obj')
-    labels1 = load_labels('../data/9028 upper.json', False)
-
-    # mesh2 = Mesh.from_file('../data/models5y/0709_5 YR_Maxillary_export.stl')
+    mesh1 = Mesh.from_file('../data/models5y/0709_5 YR_Maxillary_export.stl')
     # mesh2 = Mesh.from_file('../data/labeld_5year_betterv_objs/0715_5YR_Maxillary_export.obj')
-    mesh2 = Mesh.from_file('../data/labeld_5year_betterv_objs/9028 upper.obj')
+    mesh2 = Mesh.from_file('../data/labeld_5year_betterv_objs/0689_5 YR_Mandibular_export.obj')
+    labels2 = load_labels('../saved/regiongrow_auto/0689_5 YR_Mandibular_export.json', False)
 
     landmark_recognizer = LandmarkRecognizer(mesh2, 'U')
-    #
-    # for peak in landmark_recognizer.seg.peaks:
-    #     viz = LandmarkRecognizerVisualization(landmark_recognizer)
-    #     viz.plot_valid_peaks("blue")
-
-    #     viz.plot_discarded_peaks("Spilled", color='red')
-    #     color = (1, 0, 0) if peak.spilled else (0, 1, 0)
-    #     viz.plot_peak_masks(peak, color=color)
-    #     viz.plot_mesh()
-    #     viz.show()
 
     viz = LandmarkRecognizerVisualization(landmark_recognizer)
     # viz.plot_teeth()
     # viz.plot_discarded_overlapping_areas()
-    viz.add_mesh_with_labels(mesh2, labels1)
+    hf = landmark_recognizer.harmonic_field
+    # labels = landmark_recognizer.teeth_vertex_labels
+    labels = landmark_recognizer.harmonic_seg.harmonic_vertex_labels
+    viz.add_mesh_with_labels(mesh2, labels)
     # viz.plot_valid_peaks("green")
     # viz.plot_discarded_peaks("Spilled", color='red')
     # viz.plot_discarded_peaks("All", color='black')
@@ -921,7 +911,6 @@ if __name__ == '__main__':
     #     ], bcolor=None, border=False, face=pv.Sphere(), loc="upper center", size=(0.1, 0.1))
 
 
-
     # viz.plot_peak_accumulative_cost_no_mask(landmark_recognizer.seg.peaks[19])
     # print(landmark_recognizer.seg.peak_max_costs[landmark_recognizer.seg.peaks[19]])
     # landmark_recognizer.seg.parse_spread(landmark_recognizer.seg.peaks[32], 2)
@@ -930,16 +919,8 @@ if __name__ == '__main__':
     #     if peak.spilled:
     #         print(idx)
     # viz.plot_harmonic_field()
-    # hf = landmark_recognizer.harmonic_filed
-    # viz.plot_all_candidates_energy_accumulated_heatmap(
-    #     dbg=landmark_recognizer.harmonic_seg.debug,
-    #     use_norm=True,
-    #     weight_mode="inverse",  # 低能=高热
-    #     aggregate="mean",  # 对每个顶点取候选平均贡献
-    #     ring_band_mm=0.8,  # 0.6~1.2可调
-    #     cmap="jet_r",
-    #     title="All candidate planes (low energy = hot)"
-    # )
+    # hf = landmark_recognizer.harmonic_field
+    #
     # viz.plot_candidate_loops_colored_by_energy(
     #     dbg=landmark_recognizer.harmonic_seg.debug,
     #     use_norm=True,  # 看归一化能量
@@ -954,8 +935,8 @@ if __name__ == '__main__':
     # viz.plot_uniform_harmonic_isolines()
     # viz.plot_hf_contraints_points()
     # viz.plot_tooth_isoloops_from_peaks(peaks=landmark_recognizer.harmonic_seg.teeth[4].peaks)
-    # viz.plot_mesh()
     # landmark_recognizer.seg.parse_spread()
     # viz.plot_all_peaks_accumulative_cost_no_mask()
+    # viz.plot_mesh()
     viz.show()
 

@@ -189,10 +189,10 @@ def load_json(file_path):
 
 def load_labels(file_path, map = True):
     loaded_json = load_json(file_path)
-    labels = np.array(loaded_json['labels']).reshape(-1, 1)
+    labels = np.array(loaded_json['labels']).reshape(-1)
 
     # map primary labels to 0-12
     if map:
         labels = map_primary_label_to_flat_label(labels)
 
-    return labels
+    return np.asarray(labels, dtype=np.int64).reshape(-1)

@@ -321,24 +321,24 @@ class CurvatureBasedSeg:
         self._spread_from_peaks()
         self._predict_spillage_thresholds()
 
-        # self.try_with_max_cost(0.9)
-        self.test_max_costs()
-        self.pick_optimal_max_cost()
+        # self.try_with_max_cost(1.2)
+        # self.test_max_costs()
+        # self.pick_optimal_max_cost()
 
         # per-peak adaptive threshold
-        # for peak in self.peaks:
-        #     peak.spilled = False
-        #
-        # self._build_quadratic()
-        # self._apply_per_peak_thresholds()
-        #
-        # self._build_overlapping_area_groups()
-        # self._build_quadratic()
-        # for group in self.overlapping_area_groups:
-        #     group.update_quadratic(self.quadratic)
-        #
-        # self._group_inline_area_groups()
-        # self._build_teeth()
+        for peak in self.peaks:
+            peak.spilled = False
+
+        self._build_quadratic()
+        self._apply_per_peak_thresholds()
+
+        self._build_overlapping_area_groups()
+        self._build_quadratic()
+        for group in self.overlapping_area_groups:
+            group.update_quadratic(self.quadratic)
+
+        self._group_inline_area_groups()
+        self._build_teeth()
 
     def _build_peaks(self):
         #self.peaks = np.array([Peak(self.mesh.vertices[idx], idx) for idx in self._peak_indices])
@@ -602,125 +602,6 @@ class CurvatureBasedSeg:
         T_best, reason= self._pick_T_by_boundary_conf(peak=peak, T_cap=T_cap, q_num=70, tau=0.5,use_magnitude=True)
         return T_best, reason
 
-    def _estimate_peak_threshold(self, peak, k=60, jump_area_ratio=5.0, min_jump_area=1.0, gap_ratio=3.0, min_gap_abs=0.05, min_cap=0.8, eps=1e-9):
-        import matplotlib.pyplot as plt
-        accumulative_costs = self.peak_costs[peak]
-        spill_thr = self.spill_thresholds[peak]
-
-        # 0) spilled peaks have low threshold
-        T_cap = 0.95 * float(spill_thr)
-        if T_cap < min_cap:
-            print("Tcap:", T_cap)
-            return None, "Spilled"
-
-        valid = np.isfinite(accumulative_costs) & (accumulative_costs > 0) & (accumulative_costs < T_cap)
-        idx_faces = np.where(valid)[0]
-        c = accumulative_costs[idx_faces]
-        order = np.argsort(c)
-        faces_sorted = idx_faces[order]
-        c_sorted = c[order]
-        a_sorted = self.mesh.area_faces[faces_sorted]
-
-        # prefix stats
-        cum_area = np.cumsum(a_sorted)
-
-        # choose candidate checkpoints by quantile along the sorted list
-        n = faces_sorted.size
-        samp = np.unique(np.clip((np.linspace(0, n - 1, k)).astype(int), 0, n - 1))
-        Ts = c_sorted[samp]
-        As = cum_area[samp]
-        #
-        plt.figure()
-        plt.plot(Ts, As, marker='o')
-        plt.xlabel("Threshold T (Ts)")
-        plt.ylabel("Area A(T) (As)")
-        plt.title(f"Ts-As curve (peak={getattr(peak, 'index', None)}, T_cap={T_cap:.3f}, n_faces={n})")
-        plt.grid(True)
-        plt.show()
-        #
-        #
-        # # ---- Optional diagnostics: dA and slope ----
-        # if Ts.size >= 3:
-        #     dA = np.diff(As)
-        #     dT = np.diff(Ts) + eps
-        #     slope = dA / dT
-        #
-        #     plt.figure()
-        #     plt.plot(np.arange(dA.size), dA, marker='o')
-        #     plt.xlabel("Step index")
-        #     plt.ylabel("ΔA per step")
-        #     plt.title("dA = As[i+1] - As[i]")
-        #     plt.grid(True)
-        #     plt.show()
-        #
-        #     plt.figure()
-        #     plt.plot(np.arange(slope.size), slope, marker='o')
-        #     plt.xlabel("Step index")
-        #     plt.ylabel("slope = ΔA / ΔT")
-        #     plt.title("Slope (ΔA/ΔT)")
-        #     plt.grid(True)
-        #     plt.show()
-
-        # 1) area leak detection：看 slope = dA/dT 是否突增
-        T_area = None
-        dA = np.diff(As)
-        dT = np.diff(Ts) + eps
-        slope = dA / dT
-        for kk in range(5, slope.size):
-            base = np.median(slope[:kk]) + eps
-            if (slope[kk] > jump_area_ratio * base) and (dA[kk] > min_jump_area):
-                # 更保守：停在突增前一步
-                T_area = Ts[max(kk - 1, 0)]
-                break
-
-        clusters = cluster_Ts(Ts, tol=1e-3)
-        # best = None
-        # best_score = -1
-        # for s, e in clusters:
-        #     if e - s < 2:
-        #         continue
-        #     area_jump = As[e - 1] - As[s]
-        #     score = (e - s) * area_jump
-        #     if score > best_score:
-        #         best_score = score
-        #         best = (s, e)
-        #
-        # if best is not None:
-        #     s, e = best
-        #     T_step = Ts[max(s - 1, 0)]
-        T_step, _ = pick_step_threshold(Ts, As, clusters, beta=0.2)
-
-        T_cost = None
-        if c_sorted.size >= 200:
-            # 在中间区间找gap，避免头部噪声/尾部极端值
-            lo = int(0.10 * (c_sorted.size - 1))
-            hi = int(0.90 * (c_sorted.size - 1))
-            if hi > lo + 10:
-                dc = np.diff(c_sorted)
-                rel = dc / (c_sorted[:-1] + eps)  # 相对跳变
-
-                # 只在 [lo, hi) 搜索最大相对跳变
-                j = lo + int(np.argmax(rel[lo:hi]))
-                if (rel[j] > gap_ratio) and (dc[j] > min_gap_abs):
-                    # 同样保守：停在gap前
-                    T_cost = c_sorted[j]
-
-        # 3) 合并：谁先报警取谁（更保守取 min）
-        candidates = [t for t in (T_step, 100) if t is not None]
-        if len(candidates) > 0:
-            T_final = float(min(candidates))
-            reason = "Area leak" if (T_area is not None and T_final == T_area) else "Cost gap"
-            if T_area is not None and T_cost is not None:
-                reason = f"Both (min of area/cost): area={T_area:.4f}, cost={T_cost:.4f}"
-        else:
-            # 没检测到任何“泄漏/势垒”信号 → 回退到最大候选
-            T_final = float(Ts[-1])
-            reason = "No leak/gap -> max under cap"
-
-        # 4) clamp
-        T_final = float(np.clip(T_final, 0.05, T_cap))
-        return T_final, reason
-
     def _apply_per_peak_thresholds(self):
         for peak in self.peaks:
             T, reason = self._estimate_peak_threshold_plus(peak)
@@ -945,7 +826,7 @@ class CurvatureBasedSeg:
                 # This is approximated lazily by looking at the last and first peak of each group
                 # peak_point1 = self.mesh.vertices[max(area_group_i.peaks)]
                 # peak_point2 = self.mesh.vertices[min(area_group_j.peaks)]
-                if geom.magnitude(area_group_i.peaks[-1].point - area_group_j.peaks[0].point) > 6:
+                if geom.magnitude(area_group_i.peaks[-1].point - area_group_j.peaks[0].point) > self.MAX_TOOTH_WIDTH:
                     continue
 
                 # Skip if they are too far apart in the occlusal direction.
@@ -974,7 +855,7 @@ class CurvatureBasedSeg:
             # Each tooth receives all the OverlappingAreaGroup objects from an inline group. We
             # don't know which tooth is which yet so each is given an enumeration as a convenient ID.
             groups = [self.overlapping_area_groups[j] for j in sorted(args)]
-            tooth = Tooth(groups, i)
+            tooth = Tooth(groups, i + 1)
             if tooth.area < self.MIN_TOOTH_AREA:
                 self.discarded_teeth["Area too small"].append(tooth)
                 continue

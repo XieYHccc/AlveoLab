@@ -11,13 +11,20 @@ class Tooth:
         self.key = key
         self.palmer = palmer
         self.mesh = area_groups[0].mesh
-        # self.peaks = np.concatenate([s.peaks for s in self.area_groups])
-        self.peaks = [p for s in self.area_groups for p in s.peaks]
+
         self.mask = mask_or(*(s.mask for s in self.area_groups))
         self.orienter = None
         self.parent_orienter = self.area_groups[0].quadratic.orienter
         self.centre_of_mass = geom.center_of_mass(self.mesh.triangles_center[self.mask])
         self.quadratic = area_groups[0].quadratic
+
+        seen = set()
+        self.peaks = []
+        for s in self.area_groups:
+            for p in s.peaks:
+                if id(p) not in seen:
+                    seen.add(id(p))
+                    self.peaks.append(p)
 
         root = self.quadratic.get_root_at(self.centre_of_mass)
         self.tangent, self.distal, self.buccal = [
