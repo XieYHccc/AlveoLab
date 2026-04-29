@@ -108,7 +108,7 @@ class PcaOrienter(BaseOrienter):
         # convex_hull = self.mesh.convex_hull
         weights = (.05 - self.mesh.area_faces).clip(min=0)
         pca = Pca(self.mesh.triangles_center, weights)
-        self._center = pca.center_of_mass
+        self._center = self.mesh.centroid
         self._axisY = normalize_vector(pca.eigenvectors[0])
         self._axisZ = normalize_vector(pca.eigenvectors[1])
         self._axisX = normalize_vector(pca.eigenvectors[2])

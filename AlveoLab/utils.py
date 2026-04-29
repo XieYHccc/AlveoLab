@@ -196,3 +196,13 @@ def load_labels(file_path, map = True):
         labels = map_primary_label_to_flat_label(labels)
 
     return np.asarray(labels, dtype=np.int64).reshape(-1)
+
+
+def infer_arch_type(mesh_path) -> str:
+    mesh_name = str(mesh_path).lower()
+    if "maxillary" in mesh_name or "upper" in mesh_name:
+        return "U"
+    if "mandibular" in mesh_name or "lower" in mesh_name:
+        return "L"
+
+    raise ValueError("Unable to infer arch type from the mesh path. Please set arch_type manually.")

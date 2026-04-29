@@ -114,17 +114,17 @@ class LandmarkRecognizer:
         self.height_threshold = (np.inner(self.mesh.vertices, self.orienter.occlusal).max() -
                             self.HEIGHT_DIFF_THRESHOLD)
         # self._run_step(self._preprocess_mesh, "preprocess_mesh")
-        self._run_step(self._find_peaks, "find_peaks")
-        self._run_step(self._remove_peaks_near_boundary, "remove_peaks_near_boundary")
-        self._run_step(self._remove_peaks_on_gingiva, "remove_peaks_on_gingiva")  #TODO: acutually not works well
-        self._run_step(self._segment_teeth, "segment_teeth")
-        self._run_step(self._assemble_teeth_label_arrays, "assemble_teeth_labels")
+        # self._run_step(self._find_peaks, "find_peaks")
+        # self._run_step(self._remove_peaks_near_boundary, "remove_peaks_near_boundary")
+        # self._run_step(self._remove_peaks_on_gingiva, "remove_peaks_on_gingiva")  #TODO: acutually not works well
+        # self._run_step(self._segment_teeth, "segment_teeth")
+        # self._run_step(self._assemble_teeth_label_arrays, "assemble_teeth_labels")
 
         total_elapsed = time.perf_counter() - total_start
         logger.info(f"[pipeline] all steps finished in {total_elapsed:.3f}s")
 
     def _find_orientation(self):
-        self.orienter = PcaOrienter(self.mesh, self.arch_type)
+        self.orienter = ObbOrienter(self.mesh, self.arch_type)
 
     def _preprocess_mesh(self):
         cutting_plane_offset = self.height_threshold - 4 #TODO: adaptive offset

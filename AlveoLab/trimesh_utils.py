@@ -6,6 +6,7 @@ from trimesh.bounds import oriented_bounds
 import numpy as np
 import networkx as nx
 import scipy.sparse as sp
+from scipy.spatial import KDTree
 
 from AlveoLab.math.oriented_bounding_box import Obb
 from AlveoLab.math.geometry import cotangent
@@ -360,3 +361,72 @@ def build_Ab_from_L_and_constraints(L, n, fs_idx, bs_idx, us_idx, w=1000.0):
     A = sp.vstack([L.tocsr(), C], format='csr')
     b = np.concatenate([np.zeros(n, dtype=float), b0])
     return A, b
+
+def compute_normal_variation_curvature(
+    xyz: np.ndarray,
+    normals: np.ndarray,
+    k: int = 30,
+    leaf_size: int = 40,
+    chunk: int = 20000,
+    eps: float = 1e-12,
+    workers: int = 1,
+) -> np.ndarray:
+    """
+    xyz:     (N, 3)
+    normals: (N, 3)  (can be non-unit; will be normalized)
+    return:  curvature (N, 1) float32
+    """
+    xyz = np.asarray(xyz, dtype=np.float64)
+    normals = np.asarray(normals, dtype=np.float32)
+
+    assert xyz.ndim == 2 and xyz.shape[1] == 3
+    assert normals.ndim == 2 and normals.shape[1] == 3
+    assert xyz.shape[0] == normals.shape[0]
+
+    N = xyz.shape[0]
+    if N == 0:
+        return np.zeros((0, 1), dtype=np.float32)
+    if N == 1:
+        return np.zeros((1, 1), dtype=np.float32)
+
+    # normalize normals
+    nrm_norm = np.linalg.norm(normals, axis=1, keepdims=True)
+    nrm = normals / (nrm_norm + eps)
+
+    # build tree
+    tree = KDTree(xyz, leafsize=leaf_size)
+
+    curv = np.zeros((N,), dtype=np.float32)
+
+    # query k+1 because the nearest point is itself
+    kk = min(k + 1, N)
+
+    for s in range(0, N, chunk):
+        e = min(N, s + chunk)
+        q = xyz[s:e]
+
+        # SciPy KDTree.query returns (dist, idx)
+        _, nn_idx = tree.query(q, k=kk, workers=workers)
+
+        # When k==1, SciPy may squeeze the last dimension, so force 2D
+        if kk == 1:
+            nn_idx = nn_idx[:, None]
+
+        # drop self
+        if nn_idx.shape[1] > 1:
+            nn_idx = nn_idx[:, 1:]
+        else:
+            curv[s:e] = 0.0
+            continue
+
+        center_n = nrm[s:e][:, None, :]   # (M,1,3)
+        nb_n = nrm[nn_idx]                # (M,k,3)
+
+        # abs(dot) to ignore sign flips of normals
+        dots = np.abs(np.sum(center_n * nb_n, axis=-1))
+        dots = np.clip(dots, 0.0, 1.0)
+
+        angles = np.arccos(dots).astype(np.float32)   # [0, pi/2]
+        curv[s:e] = (angles.mean(axis=1) / (0.5 * np.pi)).astype(np.float32)
+
+    return curv.reshape(-1, 1)

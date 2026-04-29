@@ -14,8 +14,8 @@ EPS = 1e-8
 def parse_args():
     repo_root = Path(__file__).resolve().parent.parent
     default_gt_dir = repo_root / "data" / "labeld_5year_betterv_objs"
-    default_pred_dir = repo_root / "saved" / "pred_labels_tsegnet_seg_0113-2"
-    default_saved_dir = repo_root / "saved"/ "result_tsegnet0113.txt"
+    default_pred_dir = repo_root / "saved" / "pred_labels_tg_noalign"
+    default_saved_dir = repo_root / "saved"/ "result_tg_noalign.txt"
     test_list = repo_root / "saved" / "val_list_new.txt"
 
     parser = argparse.ArgumentParser(

@@ -23,12 +23,12 @@ class LandmarkRecognizerVisualization:
         self.mesh = landmark_recognizer.mesh
         self.orienter = self.lr.orienter
         # T = np.array([
-        #     [0.5, -0.8660254, 0, 0],
-        #     [0.8660254, 0.5, 0, -3],
+        #     [1, 0, 0, 0],
+        #     [0, 1, 0, 25],
         #     [0, 0, 1, 0],
         #     [0, 0, 0, 1]
         # ])
-        #
+        # #
         # self.mesh.apply_transform(T)
         # self.mesh.apply_transform(self.orienter.to_origin_transform_matrix)
 
@@ -160,12 +160,12 @@ class LandmarkRecognizerVisualization:
         self.mesh_plot_attribute_is_rgb = False
         self.cmap = 'jet_r'
 
-        for r in self.lr.harmonic_seg.tooth_boundaries:
-            if r.best is None:
-                print("没边界")
-                continue
-            self.plot_polyline(r.best.poly3d, color="green", line_width=8)
-        print(len(self.lr.harmonic_seg.tooth_boundaries))
+        # for r in self.lr.harmonic_seg.tooth_boundaries:
+        #     if r.best is None:
+        #         print("没边界")
+        #         continue
+        #     self.plot_polyline(r.best.poly3d, color="green", line_width=8)
+        # print(len(self.lr.harmonic_seg.tooth_boundaries))
 
     def plot_hf_contraints_points(self):
         vertices = self.lr.harmonic_seg.dental_mesh.vertices
@@ -214,7 +214,6 @@ class LandmarkRecognizerVisualization:
         for peak in discarded_peaks:
             peak_point = peak.point
             self.plot_sphere_at_point(peak_point, color, 0.5, 0.8)
-
 
     def plot_peak_masks(self, peak, color):
         peak_masks = self.lr.seg.peak_masks[peak]
@@ -316,11 +315,12 @@ class LandmarkRecognizerVisualization:
         self.plotter.add_mesh(arrow_up, color='green')
         self.plotter.add_mesh(arrow_right, color='red')
         self.plotter.add_mesh(arrow_forward, color='blue')
-        self.plotter.add_legend([
-            ["  Right", "red"],
+        legend = self.plotter.add_legend([
+            ["  Left", "red"],
             ["  Forward", "blue"],
             ["  Up", "green"]
-        ], bcolor=None, border=False, face=pv.Arrow(), loc="center right", size=(0.1, 0.1))
+        ], bcolor=None, border=False, face=pv.Arrow(scale=10), loc="upper right", size=(0.1, 0.1))
+        legend.GetEntryTextProperty().SetFontSize(3)
 
     def plot_tooth_orientations(self):
         for tooth in self.lr.teeth:
@@ -343,7 +343,7 @@ class LandmarkRecognizerVisualization:
         # 画所有点 + 凸包折线（闭合）
         order = np.r_[self.lr.horizontal_hull, self.lr.horizontal_hull[0]]  # 闭合回到起点
 
-        plt.scatter(self.uv[:, 0], self.uv[:, 1], s=2, alpha=0.9, label="Projected Vertices", color='pink')
+        plt.scatter(self.uv[:, 0], self.uv[:, 1], s=0.5, alpha=0.9, label="Projected Vertices", color='pink')
         plt.plot(self.uv[order, 0], self.uv[order, 1], "b-", lw=2, label="Convex Hull")
 
     def plot_horizon_bounding_box(self, ax=None):
@@ -434,6 +434,37 @@ class LandmarkRecognizerVisualization:
                                   opacity=1.0, specular=0.0, specular_power=5, ambient=0.2)
 
         # self.plotter.add_mesh(self.pv_mesh,point_size=3,render_points_as_spheres=True,color="pink")
+
+    def plot_mesh_with_vertex_scalar(self, scalar, name="vertex_scalar", cmap="viridis", clip_percentile=None):
+        scalar = np.asarray(scalar).reshape(-1)
+
+        if scalar.shape[0] != self.pv_mesh.n_points:
+            raise ValueError(
+                f"scalar length ({scalar.shape[0]}) must match number of mesh vertices ({self.pv_mesh.n_points})."
+            )
+
+        if self.mesh_plot_attribute_is_rgb:
+            self.mesh_plot_attribute_is_rgb = False
+
+        if clip_percentile is not None:
+            lower, upper = np.percentile(scalar, clip_percentile)
+            scalar = np.clip(scalar, lower, upper)
+
+        self.pv_mesh.point_data[name] = scalar
+        self.mesh_plot_attribute = name
+        self.cmap = cmap
+
+        self.plotter.add_mesh(
+            self.pv_mesh,
+            scalars=name,
+            cmap=self.cmap,
+            opacity=1.0,
+            specular=0.0,
+            specular_power=5,
+            ambient=0.2,
+        )
+
+
 
     def show(self):
         self.plotter.show()
@@ -873,21 +904,20 @@ if __name__ == '__main__':
     import trimesh as tm
     from AlveoLab.landmark_recognizer import LandmarkRecognizer
 
-    mesh1 = Mesh.from_file('../data/models5y/0709_5 YR_Maxillary_export.stl')
-    # mesh2 = Mesh.from_file('../data/labeld_5year_betterv_objs/0715_5YR_Maxillary_export.obj')
-    mesh2 = Mesh.from_file('../data/labeld_5year_betterv_objs/0689_5 YR_Mandibular_export.obj')
-    labels2 = load_labels('../saved/regiongrow_auto/0689_5 YR_Mandibular_export.json', False)
+    mesh1 = Mesh.from_file('../data/labeld_5year_betterv_objs/VAL6_UpperJaw_030919.obj')
+    mesh2 = Mesh.from_file('../data/labeld_5year_betterv_objs/1023_5 year_Mandibular_export.obj')
+    labels2 = load_labels('../saved/pred_labels_pt_pca/0580_5yr_Maxillary_export.json', False)
+    labels_gt = load_labels('../data/labeld_5year_betterv_objs/1023_5 year_Mandibular_export.json', True)
 
-    landmark_recognizer = LandmarkRecognizer(mesh2, 'U')
+    landmark_recognizer = LandmarkRecognizer(mesh2, 'L')
 
     viz = LandmarkRecognizerVisualization(landmark_recognizer)
-    # viz.plot_teeth()
     # viz.plot_discarded_overlapping_areas()
-    hf = landmark_recognizer.harmonic_field
     # labels = landmark_recognizer.teeth_vertex_labels
-    labels = landmark_recognizer.harmonic_seg.harmonic_vertex_labels
-    viz.add_mesh_with_labels(mesh2, labels)
-    # viz.plot_valid_peaks("green")
+    # hf = landmark_recognizer.harmonic_field
+    # labels = landmark_recognizer.harmonic_seg.harmonic_vertex_labels
+    viz.add_mesh_with_labels(mesh2, labels_gt)
+    # viz.plot_valid_peaks("red")
     # viz.plot_discarded_peaks("Spilled", color='red')
     # viz.plot_discarded_peaks("All", color='black')
     # viz.plot_discarded_peaks("Gingiva Peaks", color='green')
@@ -896,7 +926,6 @@ if __name__ == '__main__':
     # viz.plot_teeth_obbs()
     # viz.plot_orientation_axes()
     # viz.plot_tooth_orientations()
-    # viz.plot_edge_based_curvature()
     # viz.plot_horizon_components()
     # viz.plot_horizon_convex_hull()
     # viz.plot_horizon_bounding_box()
@@ -904,6 +933,7 @@ if __name__ == '__main__':
     # viz.plot_height_threshold_plane()0
     # viz.plot_all_valid_peak_masks()
     # viz.plot_all_overlapping_group_masks()
+
     # viz.plot_mesh()
     # viz.plotter.add_legend([
     #         ["  OK", "green"],
@@ -937,6 +967,8 @@ if __name__ == '__main__':
     # viz.plot_tooth_isoloops_from_peaks(peaks=landmark_recognizer.harmonic_seg.teeth[4].peaks)
     # landmark_recognizer.seg.parse_spread()
     # viz.plot_all_peaks_accumulative_cost_no_mask()
+    # viz.plot_teeth()
     # viz.plot_mesh()
+    # viz.add_mesh(mesh1)
+    # viz.plot_mesh_with_vertex_scalar(mesh2.vertex_mean_curvature, "curv", clip_percentile=(5, 95))
     viz.show()
-

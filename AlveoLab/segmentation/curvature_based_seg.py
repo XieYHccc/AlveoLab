@@ -322,23 +322,23 @@ class CurvatureBasedSeg:
         self._predict_spillage_thresholds()
 
         # self.try_with_max_cost(1.2)
-        # self.test_max_costs()
-        # self.pick_optimal_max_cost()
+        self.test_max_costs()
+        self.pick_optimal_max_cost()
 
         # per-peak adaptive threshold
-        for peak in self.peaks:
-            peak.spilled = False
-
-        self._build_quadratic()
-        self._apply_per_peak_thresholds()
-
-        self._build_overlapping_area_groups()
-        self._build_quadratic()
-        for group in self.overlapping_area_groups:
-            group.update_quadratic(self.quadratic)
-
-        self._group_inline_area_groups()
-        self._build_teeth()
+        # for peak in self.peaks:
+        #     peak.spilled = False
+        #
+        # self._build_quadratic()
+        # self._apply_per_peak_thresholds()
+        #
+        # self._build_overlapping_area_groups()
+        # self._build_quadratic()
+        # for group in self.overlapping_area_groups:
+        #     group.update_quadratic(self.quadratic)
+        #
+        # self._group_inline_area_groups()
+        # self._build_teeth()
 
     def _build_peaks(self):
         #self.peaks = np.array([Peak(self.mesh.vertices[idx], idx) for idx in self._peak_indices])
