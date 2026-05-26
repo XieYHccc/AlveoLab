@@ -190,6 +190,63 @@ def nan_maximum(x, y):
     np.seterr(**old)
     return out
 
+
+def _group_connected(tri2tri_map: np.ndarray):
+    """Label connected components of a face adjacency map (-1 = no edge).
+
+    Returns (group_ids, group_count).
+    """
+    n = len(tri2tri_map)
+    group_ids = np.full(n, -1, dtype=np.int64)
+    group_count = 0
+    for start in range(n):
+        if group_ids[start] != -1:
+            continue
+        stack = [start]
+        group_ids[start] = group_count
+        while stack:
+            face = stack.pop()
+            for nb in tri2tri_map[face]:
+                nb = int(nb)
+                if nb == -1 or group_ids[nb] != -1:
+                    continue
+                group_ids[nb] = group_count
+                stack.append(nb)
+        group_count += 1
+    return group_ids, group_count
+
+
+def plug_islands(tooth_ids: np.ndarray, tri2tri_map: np.ndarray) -> np.ndarray:
+    """Add small holes in any teeth to that tooth."""
+    # Safe neighbour lookup: boundary entries (-1) get sentinel -2 (matches nothing).
+    safe_map = np.where(tri2tri_map == -1, 0, tri2tri_map)
+    neighbor_ids = np.where(tri2tri_map == -1, -2, tooth_ids[safe_map])
+
+    same_tooth_mask = neighbor_ids == tooth_ids[:, np.newaxis]
+
+    # boundary_mask: unassigned face (-1) adjacent to a differently-labelled face
+    boundary_mask = (~same_tooth_mask) & (tooth_ids == -1)[:, np.newaxis]
+    boundary_args = np.nonzero(boundary_mask)
+
+    # Restrict adjacency to same-label edges, then find connected components.
+    _tri2tri_map = np.where(same_tooth_mask, tri2tri_map, -1)
+    group_ids, group_count = _group_connected(_tri2tri_map)
+
+    neighbour_ids = np.full(group_count, -1, int)
+    multiple_neighbours = np.zeros(group_count, bool)
+
+    for i, j in zip(*boundary_args):
+        group_id = int(group_ids[i])
+        neighbour_id = int(tooth_ids[tri2tri_map[i, j]])
+        if neighbour_ids[group_id] == -1:
+            neighbour_ids[group_id] = neighbour_id
+        elif neighbour_ids[group_id] != neighbour_id:
+            multiple_neighbours[group_id] = True
+
+    neighbour_ids[multiple_neighbours] = -1
+
+    return np.where(tooth_ids == -1, neighbour_ids[group_ids], tooth_ids)
+
 def spillage_threshold(costs, tri2tri_mask):
     """Predict which value of ``max_cost`` will cause a spread to be classed as spilled."""
     return costs[mask_or(*tri2tri_mask.T)].min()
@@ -324,6 +381,7 @@ class CurvatureBasedSeg:
         # self.try_with_max_cost(1.2)
         self.test_max_costs()
         self.pick_optimal_max_cost()
+        self._plug_islands()
 
         # per-peak adaptive threshold
         # for peak in self.peaks:
@@ -858,6 +916,15 @@ class CurvatureBasedSeg:
                 continue
 
             self.teeth.append(tooth)
+
+    def _plug_islands(self):
+        """Add small holes in any teeth to that tooth."""
+        tooth_ids = np.full(len(self.mesh.faces), -1, int)
+        for i, tooth in enumerate(self.teeth):
+            tooth_ids[tooth.mask] = i
+        tooth_ids_ = plug_islands(tooth_ids, self.mesh.face_neighbors)
+        for i, tooth in enumerate(self.teeth):
+            tooth.mask = i == tooth_ids_
 
     def test_max_costs(self, max_costs=None):
         if max_costs is None:

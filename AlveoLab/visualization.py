@@ -195,7 +195,8 @@ class LandmarkRecognizerVisualization:
         self.plotter.add_mesh(pv.Sphere(radius=radius, center=point), color=color, opacity=opacity)
 
     def plot_valid_peaks(self, color):
-        for peak in self.lr.seg.valid_peaks:
+        # for peak in self.lr.seg.valid_peaks:
+        for peak in self.lr.watershed_filtered_peaks:
             peak_point = peak.point
             self.plot_sphere_at_point(peak_point, color, 0.3, 0.8)
 
@@ -916,9 +917,9 @@ if __name__ == '__main__':
     from AlveoLab.landmark_recognizer import LandmarkRecognizer
 
     mesh1 = Mesh.from_file('data/labeld_5year_betterv_objs/VAL6_UpperJaw_030919.obj')
-    mesh2 = Mesh.from_file('data/labeld_5year_betterv_objs/0580_5yr_Mandibular_export.obj')
-    labels2 = load_labels('saved/pred_labels_pt_pca/0580_5yr_Maxillary_export.json', False)
-    labels_gt = load_labels('data/labeld_5year_betterv_objs/1023_5 year_Mandibular_export.json', True)
+    mesh2 = Mesh.from_file('data/labeld_5year_betterv_objs/0580_5yr_Maxillary_export.obj')
+    # labels2 = load_labels('saved/pred_labels_pt_pca/0580_5yr_Maxillary_export.json', False)
+    # labels_gt = load_labels('data/labeld_5year_betterv_objs/1023_5 year_Mandibular_export.json', True)
 
     landmark_recognizer = LandmarkRecognizer(mesh2, 'L')
 
@@ -928,8 +929,8 @@ if __name__ == '__main__':
     # hf = landmark_recognizer.harmonic_field
     # labels = landmark_recognizer.harmonic_seg.harmonic_vertex_labels
     # viz.add_mesh_with_labels(mesh2, labels_gt)
-    # viz.plot_valid_peaks("red")
-    viz.plot_discarded_peaks("Spilled", color='red')
+    viz.plot_valid_peaks("red")
+    # viz.plot_discarded_peaks("Spilled", color='red')
     # viz.plot_discarded_peaks("All", color='black')
     # viz.plot_discarded_peaks("Gingiva Peaks", color='green')
     # viz.plot_discarded_peaks("No candidate passed", color='yellow')
@@ -978,8 +979,8 @@ if __name__ == '__main__':
     # viz.plot_tooth_isoloops_from_peaks(peaks=landmark_recognizer.harmonic_seg.teeth[4].peaks)
     # landmark_recognizer.seg.parse_spread()
     # viz.plot_all_peaks_accumulative_cost_no_mask()
-    # viz.plot_teeth()
-    viz.plot_all_spilled_peak_masks()
+    viz.plot_teeth()
+    # viz.plot_all_spilled_peak_masks()
     viz.plot_mesh()
     # viz.add_mesh(mesh1)
     # viz.plot_mesh_with_vertex_scalar(mesh2.vertex_mean_curvature, "curv", clip_percentile=(5, 95))

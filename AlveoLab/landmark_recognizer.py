@@ -102,6 +102,11 @@ class LandmarkRecognizer:
         curvature = discrete_mean_curvature_measure(self.mesh)
         return curvature
 
+    @property
+    def watershed_filtered_peaks(self):
+        """All watershed-filtered peaks across every tooth, as a flat list."""
+        return [p for tooth in self.teeth for p in tooth.filtered_peaks]
+    
     def _run(self):
         """
         Run all steps.
@@ -118,6 +123,7 @@ class LandmarkRecognizer:
         self._run_step(self._remove_peaks_near_boundary, "remove_peaks_near_boundary")
         self._run_step(self._remove_peaks_on_gingiva, "remove_peaks_on_gingiva")  #TODO: acutually not works well
         self._run_step(self._segment_teeth, "segment_teeth")
+        self._run_step(self._filter_peaks_by_watershed, "filter_peaks_by_watershed")
         self._run_step(self._assemble_teeth_label_arrays, "assemble_teeth_labels")
 
         total_elapsed = time.perf_counter() - total_start
@@ -235,6 +241,10 @@ class LandmarkRecognizer:
         # update peak indices after segmentation, spilled peaks are removed
         self.peaks = self.seg.valid_peaks
         self.teeth = self.seg.teeth
+
+    def _filter_peaks_by_watershed(self):
+        for tooth in self.teeth:
+            tooth.filter_peaks_watershed(self.orienter.occlusal)
 
     def _assemble_teeth_label_arrays(self):
         tooth_masks = [tooth.mask for tooth in self.teeth]
