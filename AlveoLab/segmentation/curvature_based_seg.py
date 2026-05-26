@@ -378,26 +378,25 @@ class CurvatureBasedSeg:
         self._spread_from_peaks()
         self._predict_spillage_thresholds()
 
-        # Step 1: 方案 1 — 全局 coverage maximization 找 T*
-        # pick_optimal_max_cost 内部会 try_with_max_cost(T*) 把 quadratic /
-        # peak_masks / overlapping_area_groups / teeth 全部建好。
+        # self.try_with_max_cost(1.2)
         self.test_max_costs()
         self.pick_optimal_max_cost()
-        T_star = float(self.max_cost)
+        self._plug_islands()
 
-        # Step 2: 方案 C — per-peak 在 [alpha * T_star, T_star] 内收缩。
-        # 覆盖 Scheme 1 的 peak_masks(用各自的 T_i),保留 quadratic。
-        self._apply_plan_c_thresholds(T_star, alpha=0.6)
-
-        # Step 3: 用新 masks 重建 overlapping_area_groups / teeth。
-        # quadratic 可以保持 Scheme 1 阶段的版本(由 valid_peaks 拟合,
-        # plan C 的 fallback 行为不会丢 peak,所以集合未变);仍按原顺序重算一遍。
-        self._build_overlapping_area_groups()
-        self._build_quadratic()
-        for group in self.overlapping_area_groups:
-            group.update_quadratic(self.quadratic)
-        self._group_inline_area_groups()
-        self._build_teeth()
+        # per-peak adaptive threshold
+        # for peak in self.peaks:
+        #     peak.spilled = False
+        #
+        # self._build_quadratic()
+        # self._apply_per_peak_thresholds()
+        #
+        # self._build_overlapping_area_groups()
+        # self._build_quadratic()
+        # for group in self.overlapping_area_groups:
+        #     group.update_quadratic(self.quadratic)
+        #
+        # self._group_inline_area_groups()
+        # self._build_teeth()
 
     def _build_peaks(self):
         #self.peaks = np.array([Peak(self.mesh.vertices[idx], idx) for idx in self._peak_indices])
@@ -585,7 +584,7 @@ class CurvatureBasedSeg:
 
         return crease_ratio, conf
 
-    def _pick_T_by_boundary_conf(self, peak, T_cap, T_lower=0.0, q_num=60, tau=0.0, use_magnitude=False,):
+    def _pick_T_by_boundary_conf(self, peak, T_cap, q_num=60, tau=0.0, use_magnitude=False,):
         MAX_WIDTH = 11.5
         MAX_HEIGHT = 10.0
         MAX_DROP = 4.0
@@ -601,16 +600,9 @@ class CurvatureBasedSeg:
         # assert idx.size > 50
 
         c_sorted = np.sort(costs[idx])
-        if T_lower > 0.0:
-            # Plan C: 在 [T_lower, T_cap] 内均匀扫描候选 T。
-            # 这个范围很窄(典型 [0.6*T*, T*]),用线性扫描即可,不需要分位数分布。
-            if T_lower >= T_cap:
-                return None, "T_lower >= T_cap"
-            T_list = np.linspace(T_lower, T_cap, q_num)
-        else:
-            # 用分位数生成候选阈值(更均匀覆盖 cost 轴)
-            qs = np.linspace(0.05, 0.95, q_num)
-            T_list = np.quantile(c_sorted, qs)
+        # 用分位数生成候选阈值（更均匀覆盖 cost 轴）
+        qs = np.linspace(0.05, 0.95, q_num)
+        T_list = np.quantile(c_sorted, qs)
 
         # # 最大可达面积（在 cap 内）
         # mask_cap = np.zeros(costs.shape[0], dtype=bool)
@@ -674,42 +666,6 @@ class CurvatureBasedSeg:
                 # peak.spilled = True
                 continue
 
-            self.peak_max_costs[peak] = T
-            self.parse_spread(peak, T)
-
-    def _apply_plan_c_thresholds(self, T_star, alpha=0.6, q_num=60):
-        """方案 C: 以 Scheme 1 选出的全局 T_star 为上界,
-        per-peak 在 [alpha * T_star, T_star] 内用边界 conf 准则微调 T_i。
-
-        设计哲学:
-        - T_star 是 coverage 最大化的产物,自带 anti-merging 反馈(向上扩张
-          会让相邻牙合并被几何过滤拒,coverage 掉),所以"向上"方向已被 Scheme 1
-          锁死,plan C 只允许向下收缩。
-        - 收缩是为了修 Scheme 1 的"统一阈值偏高让某颗牙的区域被几何过滤拒"
-          的失败模式。
-        - 若 [alpha*T_star, T_star] 内没有候选通过准则,退回 T_star
-          (= Scheme 1 对该 peak 的选择),保证不比 Scheme 1 差。
-        """
-        self.discarded_peaks.clear()
-        self.discarded_overlap_groups.clear()
-        self.discarded_teeth.clear()
-        self.peak_max_costs.clear()
-
-        T_lower = alpha * T_star
-
-        for peak in self.peaks:
-            peak.spilled = False
-            T, _reason = self._pick_T_by_boundary_conf(
-                peak=peak,
-                T_cap=T_star,
-                T_lower=T_lower,
-                q_num=q_num,
-                tau=0.5,
-                use_magnitude=True,
-            )
-            if T is None:
-                # 收缩区间内无候选通过 → 退回 Scheme 1 的 T_star
-                T = T_star
             self.peak_max_costs[peak] = T
             self.parse_spread(peak, T)
 
