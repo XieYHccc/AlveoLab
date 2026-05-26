@@ -456,8 +456,6 @@ class CurvatureBasedSeg:
         else:
             return np.quantile(x, 0.9)  # 或 0.95
 
-
-
     def _boundary_crease_ratio(self, inside_mask, tau=0.0, use_magnitude=False):
         """
         inside_mask: bool, shape (n_face,)
@@ -710,7 +708,6 @@ class CurvatureBasedSeg:
             if not closed:
                 self.touches_edge_thresholds[peak] = spillage_threshold(costs, tri_has_no_neighbour)
         np.seterr(**old)
-
 
     def _build_overlapping_area_groups(self):
         """

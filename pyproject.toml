@@ -31,6 +31,12 @@ dependencies = [
     "pykdtree"
 ]
 
+[project.optional-dependencies]
+client = [
+    "PySide6",
+    "pyvistaqt"
+]
+
 [project.readme]
 file = "README.md"
 content-type = "text/markdown"
@@ -38,5 +44,7 @@ content-type = "text/markdown"
 [tool.setuptools.packages.find]
 include = [
     'AlveoLab',
-    'AlveoLab.*'
+    'AlveoLab.*',
+    'AlveoLabClient',
+    'AlveoLabClient.*'
 ]

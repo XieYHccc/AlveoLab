@@ -230,6 +230,17 @@ class LandmarkRecognizerVisualization:
         self.mesh_plot_attribute = "colors"
         self.mesh_plot_attribute_is_rgb = True
 
+    def plot_all_spilled_peak_masks(self):
+        spilled_peaks = np.array(
+                list(self.lr.discarded_peaks.get('Spilled', []))
+            )
+        for peak in spilled_peaks:
+            color = np.random.rand(3)
+            peak_masks = self.lr.seg.peak_masks[peak]
+            self.pv_mesh.cell_data["colors"][peak_masks] = color
+
+        self.mesh_plot_attribute = "colors"
+        self.mesh_plot_attribute_is_rgb = True
     def plot_all_overlapping_group_masks(self):
         for group in self.lr.seg.overlapping_area_groups:
             colors = np.random.rand(3)
@@ -904,10 +915,10 @@ if __name__ == '__main__':
     import trimesh as tm
     from AlveoLab.landmark_recognizer import LandmarkRecognizer
 
-    mesh1 = Mesh.from_file('../data/labeld_5year_betterv_objs/VAL6_UpperJaw_030919.obj')
-    mesh2 = Mesh.from_file('../data/labeld_5year_betterv_objs/1023_5 year_Mandibular_export.obj')
-    labels2 = load_labels('../saved/pred_labels_pt_pca/0580_5yr_Maxillary_export.json', False)
-    labels_gt = load_labels('../data/labeld_5year_betterv_objs/1023_5 year_Mandibular_export.json', True)
+    mesh1 = Mesh.from_file('data/labeld_5year_betterv_objs/VAL6_UpperJaw_030919.obj')
+    mesh2 = Mesh.from_file('data/labeld_5year_betterv_objs/0580_5yr_Mandibular_export.obj')
+    labels2 = load_labels('saved/pred_labels_pt_pca/0580_5yr_Maxillary_export.json', False)
+    labels_gt = load_labels('data/labeld_5year_betterv_objs/1023_5 year_Mandibular_export.json', True)
 
     landmark_recognizer = LandmarkRecognizer(mesh2, 'L')
 
@@ -916,9 +927,9 @@ if __name__ == '__main__':
     # labels = landmark_recognizer.teeth_vertex_labels
     # hf = landmark_recognizer.harmonic_field
     # labels = landmark_recognizer.harmonic_seg.harmonic_vertex_labels
-    viz.add_mesh_with_labels(mesh2, labels_gt)
+    # viz.add_mesh_with_labels(mesh2, labels_gt)
     # viz.plot_valid_peaks("red")
-    # viz.plot_discarded_peaks("Spilled", color='red')
+    viz.plot_discarded_peaks("Spilled", color='red')
     # viz.plot_discarded_peaks("All", color='black')
     # viz.plot_discarded_peaks("Gingiva Peaks", color='green')
     # viz.plot_discarded_peaks("No candidate passed", color='yellow')
@@ -968,7 +979,8 @@ if __name__ == '__main__':
     # landmark_recognizer.seg.parse_spread()
     # viz.plot_all_peaks_accumulative_cost_no_mask()
     # viz.plot_teeth()
-    # viz.plot_mesh()
+    viz.plot_all_spilled_peak_masks()
+    viz.plot_mesh()
     # viz.add_mesh(mesh1)
     # viz.plot_mesh_with_vertex_scalar(mesh2.vertex_mean_curvature, "curv", clip_percentile=(5, 95))
     viz.show()
