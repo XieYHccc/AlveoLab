@@ -917,7 +917,7 @@ if __name__ == '__main__':
     from AlveoLab.landmark_recognizer import LandmarkRecognizer
 
     mesh1 = Mesh.from_file('data/labeld_5year_betterv_objs/VAL6_UpperJaw_030919.obj')
-    mesh2 = Mesh.from_file('data/labeld_5year_betterv_objs/0580_5yr_Maxillary_export.obj')
+    mesh2 = Mesh.from_file('data/labeld_5year_betterv_objs/0609_5 YR_Maxillary_export.obj')
     # labels2 = load_labels('saved/pred_labels_pt_pca/0580_5yr_Maxillary_export.json', False)
     # labels_gt = load_labels('data/labeld_5year_betterv_objs/1023_5 year_Mandibular_export.json', True)
 

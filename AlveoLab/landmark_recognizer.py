@@ -245,6 +245,8 @@ class LandmarkRecognizer:
     def _filter_peaks_by_watershed(self):
         for tooth in self.teeth:
             tooth.filter_peaks_watershed(self.orienter.occlusal)
+        self.peaks = self.watershed_filtered_peaks
+        
 
     def _assemble_teeth_label_arrays(self):
         tooth_masks = [tooth.mask for tooth in self.teeth]

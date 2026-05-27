@@ -55,11 +55,12 @@ class Tooth:
         """Watershed-based peak filtering stored in self.filtered_peaks.
 
         Runs watershed on the tooth's vertex elevation, merges basins that are
-        too shallow (depth < _WATERSHED_MIN_DEPTH_RATIO * elevation range) or
-        too small, then emits one Peak per surviving basin at the vertex with the
-        highest occlusal elevation. At least one peak is always kept.
+        too shallow or too small, then selects at most one original peak per
+        surviving basin (the highest one). Peaks not in the tooth vertex set are
+        silently ignored. Falls back to all original peaks if none map to any basin.
         """
         vertex_indices, adjacency = self._build_tooth_vertex_adjacency()
+        local_lookup = {int(v): i for i, v in enumerate(vertex_indices)}
 
         elevation = self.mesh.vertices[vertex_indices] @ occlusal_axis
         # negate so cusp tips (elevation maxima) become watershed minima
@@ -78,28 +79,24 @@ class Tooth:
             min_basin_size=self._WATERSHED_MIN_BASIN_SIZE,
         )
 
-        filtered_peaks = []
-        for basin_min_local_idx in merged_watershed.basin_minima_local_indices:
-            basin_local_indices = np.flatnonzero(
-                merged_watershed.basin_labels == basin_min_local_idx
-            )
-            # vertex with the lowest height_function = highest occlusal elevation
-            best_local_idx = int(
-                basin_local_indices[np.argmin(height_function[basin_local_indices])]
-            )
-            global_idx = int(vertex_indices[best_local_idx])
-            p = Peak(self.mesh.vertices[global_idx], global_idx)
-            p.occlusal = occlusal_axis
-            filtered_peaks.append(p)
+        # Map each original peak to its basin label (skip peaks outside this tooth)
+        basin_to_peaks = {}
+        for peak in self.peaks:
+            local_idx = local_lookup.get(int(peak.index))
+            if local_idx is None:
+                continue
+            basin_label = int(merged_watershed.basin_labels[local_idx])
+            basin_to_peaks.setdefault(basin_label, []).append(peak)
 
-        # defensive fallback: merge_spurious_basins always leaves ≥1 basin,
-        # but guard against unexpected edge cases
+        # Keep the highest original peak per basin
+        filtered_peaks = [
+            max(basin_peaks, key=lambda p: p.point @ occlusal_axis)
+            for basin_peaks in basin_to_peaks.values()
+        ]
+
+        # Fallback: if no original peak maps to any basin, keep all of them
         if not filtered_peaks:
-            best_local = int(np.argmin(height_function))
-            global_idx = int(vertex_indices[best_local])
-            p = Peak(self.mesh.vertices[global_idx], global_idx)
-            p.occlusal = occlusal_axis
-            filtered_peaks = [p]
+            filtered_peaks = list(self.peaks)
 
         self.filtered_peaks = filtered_peaks
 
